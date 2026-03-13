@@ -1,6 +1,7 @@
+const path = require("path");
 const express = require("express");
 const cors = require("cors");
-require("dotenv").config();
+require("dotenv").config({ path: path.join(__dirname, ".env") });
 
 const connectDB = require("./config/db");
 const authRoutes = require("./routes/authRoutes");
@@ -10,6 +11,10 @@ const diaryRoutes = require("./routes/diaryRoutes");
 const pregnancyRoutes = require("./routes/pregnancyRoutes");
 const messageRoutes = require("./routes/messageRoutes");
 const appointmentRoutes = require("./routes/appointmentRoutes");
+const analyticsRoutes = require("./routes/analyticsRoutes");
+const trackerRoutes = require("./routes/trackerRoutes");
+const syncRoutes = require("./routes/syncRoutes");
+const deviceRoutes = require("./routes/deviceRoutes");
 const guideRoutes = require("./routes/guides");
 const approvalRoutes = require("./routes/approvalRoutes");
 const reminderRoutes = require("./routes/reminderRoutes");
@@ -61,6 +66,10 @@ app.use("/api/guides", guideRoutes);
 app.use("/api/auth/guides", guideRoutes);
 app.use("/api/approvals", approvalRoutes);
 app.use("/api/auth/approvals", approvalRoutes);
+app.use("/api/analytics", analyticsRoutes);
+app.use("/api/trackers", trackerRoutes);
+app.use("/api/sync", syncRoutes);
+app.use("/api/device", deviceRoutes);
 
 // 4) 404 handler (optional but good)
 app.use((req, res) => {
