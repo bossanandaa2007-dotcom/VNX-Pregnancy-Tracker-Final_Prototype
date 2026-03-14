@@ -13,6 +13,10 @@ export interface HealthReminder {
   startDate?: string | null;
   endDate?: string | null;
   notifyTimes?: string[];
+  completedDate?: string | null;
+  completedTimes?: string[];
+  completionCount?: number;
+  totalCount?: number;
   isDone: boolean;
   lastMarkedAt?: string | null;
   createdAt?: string;

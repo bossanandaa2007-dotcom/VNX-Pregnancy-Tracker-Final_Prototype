@@ -1,6 +1,49 @@
 import { API_BASE } from '@/config/api';
 import type { HealthReminder } from '@/types/reminder';
 
+const pad2 = (value: number) => String(value).padStart(2, '0');
+
+export const getLocalDateKey = (date = new Date()) =>
+  `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+
+const normalizeReminder = (reminder: HealthReminder): HealthReminder => {
+  const todayKey = getLocalDateKey();
+  const notifyTimes = Array.isArray(reminder.notifyTimes)
+    ? reminder.notifyTimes.map((value) => String(value).trim()).filter(Boolean).sort()
+    : [];
+  const fallbackDateKey =
+    reminder.lastMarkedAt && !Number.isNaN(new Date(reminder.lastMarkedAt).getTime())
+      ? getLocalDateKey(new Date(reminder.lastMarkedAt))
+      : null;
+  const completedDate = typeof reminder.completedDate === 'string' ? reminder.completedDate : fallbackDateKey;
+  const rawCompletedTimes = Array.isArray(reminder.completedTimes)
+    ? reminder.completedTimes.map((value) => String(value).trim()).filter(Boolean)
+    : [];
+  const fallbackCompletedTimes =
+    rawCompletedTimes.length === 0 && reminder.isDone && completedDate === todayKey
+      ? notifyTimes.length > 0
+        ? [...notifyTimes]
+        : ['default']
+      : rawCompletedTimes;
+  const completedTimes =
+    completedDate === todayKey
+      ? fallbackCompletedTimes.filter((value) => notifyTimes.length === 0 || notifyTimes.includes(value))
+      : [];
+  const totalCount = notifyTimes.length || 1;
+  const completionCount = Math.min(completedTimes.length, totalCount);
+
+  return {
+    ...reminder,
+    notifyTimes,
+    completedDate,
+    completedTimes,
+    completionCount,
+    totalCount,
+    isDone: completionCount >= totalCount,
+    lastMarkedAt: completionCount > 0 ? reminder.lastMarkedAt ?? null : null,
+  };
+};
+
 const parseResponse = async (res: Response) => {
   const data = await res.json().catch(() => null);
   if (!res.ok || !data?.success) {
@@ -12,7 +55,7 @@ const parseResponse = async (res: Response) => {
 export const fetchPatientReminders = async (patientId: string, doctorId?: string) => {
   const qs = doctorId ? `?doctorId=${encodeURIComponent(doctorId)}` : '';
   const data = await parseResponse(await fetch(`${API_BASE}/api/reminders/patient/${patientId}${qs}`));
-  return (data.reminders || []) as HealthReminder[];
+  return ((data.reminders || []) as HealthReminder[]).map(normalizeReminder);
 };
 
 export const createReminder = async (
@@ -35,7 +78,7 @@ export const createReminder = async (
       body: JSON.stringify(payload),
     })
   );
-  return data.reminder as HealthReminder;
+  return normalizeReminder(data.reminder as HealthReminder);
 };
 
 export const updateReminder = async (
@@ -58,7 +101,7 @@ export const updateReminder = async (
       body: JSON.stringify(payload),
     })
   );
-  return data.reminder as HealthReminder;
+  return normalizeReminder(data.reminder as HealthReminder);
 };
 
 export const deleteReminder = async (
@@ -76,7 +119,7 @@ export const deleteReminder = async (
 
 export const updateReminderStatus = async (
   reminderId: string,
-  payload: { patientId: string; isDone: boolean }
+  payload: { patientId: string; isDone: boolean; time?: string; dateKey?: string }
 ) => {
   const data = await parseResponse(
     await fetch(`${API_BASE}/api/reminders/${reminderId}/status`, {
@@ -85,5 +128,7 @@ export const updateReminderStatus = async (
       body: JSON.stringify(payload),
     })
   );
-  return data.reminder as HealthReminder;
+  return normalizeReminder(data.reminder as HealthReminder);
 };
+
+export { normalizeReminder };

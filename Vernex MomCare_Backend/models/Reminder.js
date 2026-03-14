@@ -50,6 +50,14 @@ const reminderSchema = new mongoose.Schema(
       type: [String],
       default: [],
     },
+    completedDate: {
+      type: String,
+      default: null,
+    },
+    completedTimes: {
+      type: [String],
+      default: [],
+    },
     isDone: {
       type: Boolean,
       default: false,

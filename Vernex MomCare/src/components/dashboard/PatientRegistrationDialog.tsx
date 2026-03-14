@@ -40,6 +40,7 @@ export function PatientRegistrationDialog({
   });
 
   const [loading, setLoading] = useState(false);
+  const [showCredentials, setShowCredentials] = useState(false);
 
   const handleChange = (key: keyof typeof form, value: string) => {
     if (key === 'phone') {
@@ -100,17 +101,8 @@ export function PatientRegistrationDialog({
         description: data.message || 'Patient registration request sent to admin for approval.',
       });
 
-      setForm({
-        name: '',
-        age: '',
-        email: '',
-        password: '',
-        pregnancyStartDate: '',
-        phone: '',
-        notes: '',
-      });
+      setShowCredentials(true);
       onRequestSubmitted?.();
-      onOpenChange(false);
     } catch (err: any) {
       console.error('Create patient error:', err);
       toast({
@@ -124,6 +116,16 @@ export function PatientRegistrationDialog({
   };
 
   const handleClose = () => {
+    setForm({
+      name: '',
+      age: '',
+      email: '',
+      password: '',
+      pregnancyStartDate: '',
+      phone: '',
+      notes: '',
+    });
+    setShowCredentials(false);
     onOpenChange(false);
   };
 
@@ -137,86 +139,124 @@ export function PatientRegistrationDialog({
           </p>
         </DialogHeader>
 
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
+        {!showCredentials && (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Patient Name *</Label>
+                <Input
+                  placeholder="Full name"
+                  value={form.name}
+                  onChange={(e) => handleChange('name', e.target.value)}
+                />
+              </div>
+
+              <div>
+                <Label>Age *</Label>
+                <Input
+                  placeholder="Years"
+                  value={form.age}
+                  onChange={(e) => handleChange('age', e.target.value)}
+                />
+              </div>
+            </div>
+
             <div>
-              <Label>Patient Name *</Label>
+              <Label>Email Address *</Label>
               <Input
-                placeholder="Full name"
-                value={form.name}
-                onChange={(e) => handleChange('name', e.target.value)}
+                type="email"
+                placeholder="patient@email.com"
+                value={form.email}
+                onChange={(e) => handleChange('email', e.target.value)}
               />
             </div>
 
             <div>
-              <Label>Age *</Label>
+              <Label>Password *</Label>
               <Input
-                placeholder="Years"
-                value={form.age}
-                onChange={(e) => handleChange('age', e.target.value)}
+                type="password"
+                placeholder="Set password"
+                value={form.password}
+                onChange={(e) => handleChange('password', e.target.value)}
               />
             </div>
-          </div>
 
-          <div>
-            <Label>Email Address *</Label>
-            <Input
-              type="email"
-              placeholder="patient@email.com"
-              value={form.email}
-              onChange={(e) => handleChange('email', e.target.value)}
-            />
-          </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Pregnancy Start Date *</Label>
+                <Input
+                  type="date"
+                  value={form.pregnancyStartDate}
+                  onChange={(e) => handleChange('pregnancyStartDate', e.target.value)}
+                />
+              </div>
 
-          <div>
-            <Label>Password *</Label>
-            <Input
-              type="password"
-              placeholder="Set password"
-              value={form.password}
-              onChange={(e) => handleChange('password', e.target.value)}
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label>Pregnancy Start Date *</Label>
-              <Input
-                type="date"
-                value={form.pregnancyStartDate}
-                onChange={(e) => handleChange('pregnancyStartDate', e.target.value)}
-              />
+              <div>
+                <Label>Contact Phone</Label>
+                <Input
+                  placeholder="10-digit phone number"
+                  inputMode="numeric"
+                  maxLength={10}
+                  value={form.phone}
+                  onChange={(e) => handleChange('phone', e.target.value)}
+                />
+              </div>
             </div>
 
             <div>
-              <Label>Contact Phone</Label>
+              <Label>Medical Notes (Optional)</Label>
               <Input
-                placeholder="10-digit phone number"
-                inputMode="numeric"
-                maxLength={10}
-                value={form.phone}
-                onChange={(e) => handleChange('phone', e.target.value)}
+                placeholder="Any relevant medical history or notes..."
+                value={form.notes}
+                onChange={(e) => handleChange('notes', e.target.value)}
               />
             </div>
           </div>
+        )}
 
-          <div>
-            <Label>Medical Notes (Optional)</Label>
-            <Input
-              placeholder="Any relevant medical history or notes..."
-              value={form.notes}
-              onChange={(e) => handleChange('notes', e.target.value)}
-            />
+        {showCredentials && (
+          <div className="mt-4 rounded-xl border bg-accent/30 p-4 space-y-3">
+            <h3 className="text-sm font-semibold text-primary">
+              Patient Login Credentials
+            </h3>
+
+            <p className="text-sm">
+              <span className="text-muted-foreground">Email:</span>{' '}
+              <span className="font-medium">{form.email}</span>
+            </p>
+
+            <p className="text-sm">
+              <span className="text-muted-foreground">Password:</span>{' '}
+              <span className="font-medium">{form.password}</span>
+            </p>
+
+            <p className="text-xs text-muted-foreground">
+              Save these credentials now. They will not be shown again.
+            </p>
+
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() =>
+                navigator.clipboard.writeText(
+                  `Patient Login\nEmail: ${form.email}\nPassword: ${form.password}`
+                )
+              }
+            >
+              Copy Credentials
+            </Button>
           </div>
-        </div>
+        )}
 
         <div className="flex justify-end gap-2 pt-4">
           <Button variant="outline" onClick={handleClose}>
-            Cancel
+            {showCredentials ? 'Close' : 'Cancel'}
           </Button>
-          <Button onClick={handleSubmit} disabled={loading}>
-            {loading ? 'Sending...' : 'Send For Approval'}
-          </Button>
+          {!showCredentials && (
+            <Button onClick={handleSubmit} disabled={loading}>
+              {loading ? 'Sending...' : 'Send For Approval'}
+            </Button>
+          )}
         </div>
       </DialogContent>
     </Dialog>

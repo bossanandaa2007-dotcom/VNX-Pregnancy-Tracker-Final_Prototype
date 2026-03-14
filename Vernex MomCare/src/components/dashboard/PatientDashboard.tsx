@@ -3,11 +3,10 @@ import {
   Baby,
   Bell,
   Calendar,
+  ChevronDown,
   Heart,
-  Check,
   Pencil,
   Plus,
-  RotateCcw,
   Search,
   Sparkles,
   Trash2,
@@ -39,6 +38,8 @@ import {
   createReminder,
   deleteReminder,
   fetchPatientReminders,
+  getLocalDateKey,
+  normalizeReminder,
   updateReminder,
   updateReminderStatus,
 } from '@/lib/reminders';
@@ -66,10 +67,12 @@ type PatientProfile = {
 
 type ReminderConfirmAction =
   | { type: 'update' }
+  | { type: 'toggle'; reminder: HealthReminder; isDone: boolean; time?: string }
   | { type: 'delete'; reminder: HealthReminder }
   | null;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const OVERDUE_REMINDER_DELAY_MINUTES = 15;
 
 const getMilestoneByWeek = (week: number) => {
   if (week <= 13) return 'First Trimester';
@@ -165,6 +168,95 @@ const formatReminderDateLabel = (value: string, fallback: string) => {
     ? date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
     : fallback;
 };
+const formatReminderActiveRange = (startDate?: string, endDate?: string) => {
+  if (!startDate && !endDate) return '';
+
+  const startLabel = startDate ? formatReminderDateLabel(startDate, 'Today') : 'Today';
+  const endLabel = endDate ? formatReminderDateLabel(endDate, 'Ongoing') : 'Ongoing';
+
+  if (startDate && endDate) {
+    return startLabel === endLabel ? startLabel : `${startLabel} - ${endLabel}`;
+  }
+
+  if (endDate) return `Until ${endLabel}`;
+  return `From ${startLabel}`;
+};
+const normalizeReminderDateRange = (startDate?: string, endDate?: string) => {
+  if (startDate && endDate && startDate > endDate) {
+    return { startDate: endDate, endDate: startDate };
+  }
+  return { startDate: startDate || '', endDate: endDate || '' };
+};
+const isReminderVisibleOnDate = (reminder: HealthReminder, dateKey: string) => {
+  const startDate = reminder.startDate ? String(reminder.startDate).slice(0, 10) : '';
+  const endDate = reminder.endDate ? String(reminder.endDate).slice(0, 10) : '';
+
+  if (startDate && startDate > dateKey) return false;
+  if (endDate && endDate < dateKey) return false;
+  return true;
+};
+const getReminderCompletedTimes = (reminder: HealthReminder) =>
+  Array.isArray(reminder.completedTimes) ? reminder.completedTimes : [];
+
+const getReminderProgressLabel = (reminder: HealthReminder) => {
+  const totalCount = reminder.totalCount || Math.max(reminder.notifyTimes?.length || 0, 1);
+  const completionCount = reminder.completionCount || 0;
+
+  if (completionCount <= 0) return 'Pending';
+  if (completionCount >= totalCount) return 'Done';
+  return `${completionCount}/${totalCount} done`;
+};
+
+const getReminderStatusClasses = (reminder: HealthReminder) => {
+  const totalCount = reminder.totalCount || Math.max(reminder.notifyTimes?.length || 0, 1);
+  const completionCount = reminder.completionCount || 0;
+
+  if (completionCount >= totalCount) return 'bg-green-100 text-green-700';
+  if (completionCount > 0) return 'bg-sky-100 text-sky-700';
+  return 'bg-amber-100 text-amber-700';
+};
+
+const getReminderNextPendingTime = (reminder: HealthReminder) => {
+  const completedTimes = getReminderCompletedTimes(reminder);
+  const notifyTimes = Array.isArray(reminder.notifyTimes) ? reminder.notifyTimes : [];
+  return notifyTimes.find((time) => !completedTimes.includes(time)) || notifyTimes[0];
+};
+
+const getTimeInMinutes = (value: string) => {
+  const [hoursText, minutesText] = value.split(':');
+  const hours = Number(hoursText);
+  const minutes = Number(minutesText);
+  if (Number.isNaN(hours) || Number.isNaN(minutes)) return null;
+  return hours * 60 + minutes;
+};
+const getReminderTitleSuggestions = (
+  reminders: HealthReminder[],
+  query: string,
+  defaultTitles: string[],
+  limit = 8
+) => {
+  const normalizedQuery = query.trim().toLowerCase();
+  const recentTitles = reminders
+    .slice()
+    .sort((a, b) => {
+      const aTime = new Date(a.updatedAt || a.lastMarkedAt || a.createdAt || 0).getTime();
+      const bTime = new Date(b.updatedAt || b.lastMarkedAt || b.createdAt || 0).getTime();
+      return bTime - aTime;
+    })
+    .map((reminder) => reminder.title.trim())
+    .filter(Boolean);
+
+  const seen = new Set<string>();
+  return [...recentTitles, ...defaultTitles]
+    .filter((title) => {
+      const key = title.toLowerCase();
+      if (seen.has(key)) return false;
+      if (normalizedQuery && !key.includes(normalizedQuery)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, limit);
+};
 const COMMON_REMINDER_TITLES = [
   'Take iron tablet',
   'Take prenatal vitamins',
@@ -172,6 +264,14 @@ const COMMON_REMINDER_TITLES = [
   'Morning walk',
   'Check blood pressure',
   'Take calcium tablet',
+  'Track baby movements',
+  'Eat healthy snacks',
+  'Take folic acid',
+  'Do breathing exercises',
+  'Check blood sugar',
+  'Attend doctor appointment',
+  'Get enough rest',
+  'Take evening medicine',
 ];
 const MOBILE_PICKER_HOURS = Array.from({ length: 12 }, (_, index) =>
   String(index + 1).padStart(2, '0')
@@ -195,6 +295,9 @@ export function PatientDashboard() {
   const [showReminderActions, setShowReminderActions] = useState(false);
   const [confirmReminderAction, setConfirmReminderAction] = useState<ReminderConfirmAction>(null);
   const [mobileTimePickerOpen, setMobileTimePickerOpen] = useState(false);
+  const [startDatePickerOpen, setStartDatePickerOpen] = useState(false);
+  const [endDatePickerOpen, setEndDatePickerOpen] = useState(false);
+  const [titleSuggestionsOpen, setTitleSuggestionsOpen] = useState(false);
   const [reminderForm, setReminderForm] = useState({
     title: '',
     notifyTimeInput: '',
@@ -216,8 +319,29 @@ export function PatientDashboard() {
   const [errorMessage, setErrorMessage] = useState('');
   const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
   const [secondsToNext, setSecondsToNext] = useState(0);
+  const reminderTitleSuggestions = useMemo(
+    () => getReminderTitleSuggestions(reminders, reminderForm.title, COMMON_REMINDER_TITLES),
+    [reminders, reminderForm.title]
+  );
+
+  const loadReminders = async () => {
+    if (!patientId || user?.role !== 'patient') return;
+    setRemindersLoading(true);
+    try {
+      const rows = await fetchPatientReminders(patientId);
+      setReminders(rows);
+    } catch (error) {
+      console.error('Reminder fetch error:', error);
+    } finally {
+      setRemindersLoading(false);
+    }
+  };
   const [lastManualRefreshAt, setLastManualRefreshAt] = useState<number | null>(null);
   const [now, setNow] = useState<Date>(new Date());
+  const visibleReminders = useMemo(() => {
+    const todayKey = getLocalDateKey(now);
+    return reminders.filter((reminder) => isReminderVisibleOnDate(reminder, todayKey));
+  }, [now, reminders]);
   const [babyDevelopmentText, setBabyDevelopmentText] = useState(
     'Your baby continues to grow and develop every day.'
   );
@@ -356,19 +480,6 @@ export function PatientDashboard() {
   }, [user?.id, user?.role, user?.email]);
 
   useEffect(() => {
-    const loadReminders = async () => {
-      if (!patientId || user?.role !== 'patient') return;
-      setRemindersLoading(true);
-      try {
-        const rows = await fetchPatientReminders(patientId);
-        setReminders(rows);
-      } catch (error) {
-        console.error('Reminder fetch error:', error);
-      } finally {
-        setRemindersLoading(false);
-      }
-    };
-
     loadReminders();
   }, [patientId, user?.role]);
 
@@ -385,31 +496,54 @@ export function PatientDashboard() {
     const tick = () => {
       const nowValue = new Date();
       const currentTime = `${pad2(nowValue.getHours())}:${pad2(nowValue.getMinutes())}`;
-      const today = nowValue.toISOString().slice(0, 10);
+      const currentMinutes = nowValue.getHours() * 60 + nowValue.getMinutes();
+      const today = getLocalDateKey(nowValue);
 
       reminders.forEach((reminder) => {
-        if (reminder.isDone) return;
-        const today = nowValue.toISOString().slice(0, 10);
         if (reminder.startDate && String(reminder.startDate).slice(0, 10) > today) return;
         if (reminder.endDate && String(reminder.endDate).slice(0, 10) < today) return;
         const reminderId = String(reminder._id || reminder.id || '');
         const times = Array.isArray(reminder.notifyTimes) ? reminder.notifyTimes : [];
-        if (!times.includes(currentTime)) return;
+        const completedTimes = getReminderCompletedTimes(reminder);
 
-        const storageKey = `vnx-reminder-${reminderId}-${today}-${currentTime}`;
-        if (localStorage.getItem(storageKey)) return;
-        localStorage.setItem(storageKey, '1');
+        times.forEach((time) => {
+          if (completedTimes.includes(time)) return;
 
-        toast({
-          title: reminder.title,
-          description: reminder.details || `Reminder scheduled for ${currentTime}`,
-        });
+          const dueStorageKey = `vnx-reminder-due-${reminderId}-${today}-${time}`;
+          const overdueStorageKey = `vnx-reminder-overdue-${reminderId}-${today}-${time}`;
+          const scheduledMinutes = getTimeInMinutes(time);
+          if (scheduledMinutes === null) return;
 
-        if ('Notification' in window && Notification.permission === 'granted') {
-          new Notification('Health Reminder', {
-            body: `${reminder.title} at ${currentTime}`,
+          if (time === currentTime && !localStorage.getItem(dueStorageKey)) {
+            localStorage.setItem(dueStorageKey, '1');
+            toast({
+              title: reminder.title,
+              description: reminder.details || `Reminder scheduled for ${formatReminderTime(time)}`,
+            });
+
+            if ('Notification' in window && Notification.permission === 'granted') {
+              new Notification('Health Reminder', {
+                body: `${reminder.title} at ${formatReminderTime(time)}`,
+              });
+            }
+            return;
+          }
+
+          const isOverdue = currentMinutes >= scheduledMinutes + OVERDUE_REMINDER_DELAY_MINUTES;
+          if (!isOverdue || localStorage.getItem(overdueStorageKey)) return;
+
+          localStorage.setItem(overdueStorageKey, '1');
+          toast({
+            title: `${reminder.title} is overdue`,
+            description: `You have not marked the ${formatReminderTime(time)} reminder as done yet.`,
           });
-        }
+
+          if ('Notification' in window && Notification.permission === 'granted') {
+            new Notification('Reminder overdue', {
+              body: `${reminder.title} for ${formatReminderTime(time)} is still pending.`,
+            });
+          }
+        });
       });
     };
 
@@ -417,6 +551,20 @@ export function PatientDashboard() {
     const intervalId = setInterval(tick, 30_000);
     return () => clearInterval(intervalId);
   }, [patientId, reminders, toast, user?.role]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || reminders.length === 0) return;
+
+    const now = new Date();
+    const nextMidnight = new Date(now);
+    nextMidnight.setHours(24, 0, 1, 0);
+    const timeoutId = window.setTimeout(() => {
+      setReminders((prev) => prev.map((item) => normalizeReminder({ ...item })));
+      loadReminders();
+    }, Math.max(1_000, nextMidnight.getTime() - now.getTime()));
+
+    return () => window.clearTimeout(timeoutId);
+  }, [reminders, patientId, user?.role]);
 
   useEffect(() => {
     const loadBabyDevelopment = async () => {
@@ -447,6 +595,9 @@ export function PatientDashboard() {
 
   const openCreateReminder = () => {
     setEditingReminderId(null);
+    setStartDatePickerOpen(false);
+    setEndDatePickerOpen(false);
+    setTitleSuggestionsOpen(false);
     setReminderForm({
       title: '',
       notifyTimeInput: '',
@@ -463,6 +614,9 @@ export function PatientDashboard() {
 
   const openEditReminder = (reminder: HealthReminder) => {
     setEditingReminderId(String(reminder._id || reminder.id || ''));
+    setStartDatePickerOpen(false);
+    setEndDatePickerOpen(false);
+    setTitleSuggestionsOpen(false);
     setReminderForm({
       title: reminder.title || '',
       notifyTimeInput: '',
@@ -526,6 +680,9 @@ export function PatientDashboard() {
       });
       setReminderDialogOpen(false);
       setEditingReminderId(null);
+      setStartDatePickerOpen(false);
+      setEndDatePickerOpen(false);
+      setTitleSuggestionsOpen(false);
       setReminderForm({
         title: '',
         notifyTimeInput: '',
@@ -581,11 +738,16 @@ export function PatientDashboard() {
     setConfirmReminderAction({ type: 'delete', reminder });
   };
 
-  const handleToggleReminder = async (reminder: HealthReminder, isDone: boolean) => {
+  const toggleReminderStatus = async (reminder: HealthReminder, isDone: boolean, time?: string) => {
     const reminderId = String(reminder._id || reminder.id || '');
     if (!reminderId || !patientId) return;
     try {
-      const updated = await updateReminderStatus(reminderId, { patientId, isDone });
+      const updated = await updateReminderStatus(reminderId, {
+        patientId,
+        isDone,
+        time,
+        dateKey: getLocalDateKey(),
+      });
       setReminders((prev) =>
         prev.map((item) => (String(item._id || item.id) === reminderId ? updated : item))
       );
@@ -597,6 +759,10 @@ export function PatientDashboard() {
         variant: 'destructive',
       });
     }
+  };
+
+  const handleToggleReminder = (reminder: HealthReminder, isDone: boolean, time?: string) => {
+    setConfirmReminderAction({ type: 'toggle', reminder, isDone, time });
   };
 
   const handleAddNotifyTime = () => {
@@ -982,87 +1148,138 @@ export function PatientDashboard() {
             </div>
           </CardHeader>
           <CardContent>
-            <div className="space-y-3">
+            <div>
               {remindersLoading ? (
                 <div className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground">
                   Loading reminders...
                 </div>
-              ) : reminders.length === 0 ? (
+              ) : visibleReminders.length === 0 ? (
                 <div className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground">
-                  No health reminders yet. Add one for yourself or wait for your doctor to set one.
+                  No active health reminders right now. Add one for yourself or wait for your doctor to set one.
                 </div>
               ) : (
-                reminders.map((reminder) => {
-                  const reminderId = String(reminder._id || reminder.id || '');
-                  const isOwnReminder = reminder.createdByRole === 'patient';
-                  return (
-                    <div
-                      key={reminderId}
-                      className={`rounded-xl border bg-background p-4 transition-colors ${
-                        reminder.isDone ? 'border-green-200 bg-green-50/50' : 'hover:bg-accent/30'
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex-1">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <p className="text-sm font-medium text-foreground">{reminder.title}</p>
-                            <span
-                              className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
-                                reminder.createdByRole === 'doctor'
-                                  ? 'bg-primary/10 text-primary'
-                                  : 'bg-accent text-accent-foreground'
-                              }`}
-                            >
-                              {reminder.createdByRole === 'doctor' ? 'Doctor set' : 'My reminder'}
-                            </span>
-                            <span
-                              className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
-                                reminder.isDone
-                                  ? 'bg-green-100 text-green-700'
-                                  : 'bg-amber-100 text-amber-700'
-                              }`}
-                            >
-                              {reminder.isDone ? 'Done' : 'Not done'}
-                            </span>
+                <div className="grid gap-3 md:grid-cols-2">
+                  {visibleReminders.map((reminder) => {
+                    const reminderId = String(reminder._id || reminder.id || '');
+                    const isOwnReminder = reminder.createdByRole === 'patient';
+                    const activeRangeLabel = formatReminderActiveRange(reminder.startDate, reminder.endDate);
+                    const notifyTimes = Array.isArray(reminder.notifyTimes) ? reminder.notifyTimes : [];
+                    const completedTimes = getReminderCompletedTimes(reminder);
+                    const progressLabel = getReminderProgressLabel(reminder);
+                    const nextPendingTime = getReminderNextPendingTime(reminder);
+                    const isMultiTimeReminder = notifyTimes.length > 1;
+                    const canToggleFromCard = !isMultiTimeReminder && !!nextPendingTime;
+                    return (
+                      <div
+                        key={reminderId}
+                        role={canToggleFromCard ? 'button' : undefined}
+                        tabIndex={canToggleFromCard ? 0 : undefined}
+                        aria-pressed={canToggleFromCard ? reminder.isDone : undefined}
+                        onClick={
+                          canToggleFromCard
+                            ? () => handleToggleReminder(reminder, !reminder.isDone, nextPendingTime)
+                            : undefined
+                        }
+                        onKeyDown={
+                          canToggleFromCard
+                            ? (event) => {
+                                if (event.key === 'Enter' || event.key === ' ') {
+                                  event.preventDefault();
+                                  handleToggleReminder(reminder, !reminder.isDone, nextPendingTime);
+                                }
+                              }
+                            : undefined
+                        }
+                        className={`rounded-xl border bg-background p-3.5 text-left transition-colors ${
+                          canToggleFromCard ? 'cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/30' : ''
+                        } ${
+                          reminder.isDone
+                            ? 'border-green-200 bg-green-50/50'
+                            : (reminder.completionCount || 0) > 0
+                              ? 'border-sky-200 bg-sky-50/40'
+                              : 'hover:bg-accent/30'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className="truncate text-sm font-medium text-foreground" title={reminder.title}>
+                                {reminder.title}
+                              </p>
+                              <span
+                                className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                                  reminder.createdByRole === 'doctor'
+                                    ? 'bg-primary/10 text-primary'
+                                    : 'bg-accent text-accent-foreground'
+                                }`}
+                              >
+                                {reminder.createdByRole === 'doctor' ? 'Doctor' : 'Mine'}
+                              </span>
+                              <span
+                                className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${getReminderStatusClasses(reminder)}`}
+                              >
+                                {progressLabel}
+                              </span>
+                            </div>
+                            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                              <span>{reminder.intervalLabel}</span>
+                              {activeRangeLabel && <span>{activeRangeLabel}</span>}
+                            </div>
+                            {isMultiTimeReminder && (
+                              <div className="mt-2 flex flex-wrap gap-2">
+                                {notifyTimes.map((time) => {
+                                  const isTimeDone = completedTimes.includes(time);
+                                  return (
+                                    <button
+                                      key={time}
+                                      type="button"
+                                      className={`rounded-lg border px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                                        isTimeDone
+                                          ? 'border-green-200 bg-green-100 text-green-700'
+                                          : 'border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100'
+                                      }`}
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        handleToggleReminder(reminder, !isTimeDone, time);
+                                      }}
+                                    >
+                                      {formatReminderTime(time)} {isTimeDone ? 'done' : 'mark'}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            )}
+                            {isMultiTimeReminder && (
+                              <p className="mt-1 text-[11px] text-muted-foreground">
+                                Mark each reminder time separately.
+                              </p>
+                            )}
+                            {reminder.details && (
+                              <p
+                                className="mt-1 truncate text-xs text-muted-foreground"
+                                title={reminder.details}
+                              >
+                                Note: {reminder.details}
+                              </p>
+                            )}
+                            {reminder.lastMarkedAt && (
+                              <p className="mt-1 text-[11px] text-muted-foreground">
+                                Last updated: {new Date(reminder.lastMarkedAt).toLocaleString()}
+                              </p>
+                            )}
                           </div>
-                          <p className="mt-1 text-xs text-muted-foreground">{reminder.intervalLabel}</p>
-                          {(reminder.startDate || reminder.endDate) && (
-                            <p className="mt-1 text-[11px] text-muted-foreground">
-                              Active:{' '}
-                              {reminder.startDate ? new Date(reminder.startDate).toLocaleDateString() : 'Now'}
-                              {' '}to{' '}
-                              {reminder.endDate ? new Date(reminder.endDate).toLocaleDateString() : 'Ongoing'}
-                            </p>
-                          )}
-                          {reminder.details && (
-                            <p className="mt-2 text-xs text-muted-foreground">{reminder.details}</p>
-                          )}
-                          {reminder.lastMarkedAt && (
-                            <p className="mt-2 text-[11px] text-muted-foreground">
-                              Last updated: {new Date(reminder.lastMarkedAt).toLocaleString()}
-                            </p>
-                          )}
                         </div>
-                      </div>
-
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        <Button
-                          size="sm"
-                          variant={reminder.isDone ? 'outline' : 'default'}
-                          className="gap-2 rounded-xl"
-                          onClick={() => handleToggleReminder(reminder, !reminder.isDone)}
-                        >
-                          {reminder.isDone ? <RotateCcw className="h-4 w-4" /> : <Check className="h-4 w-4" />}
-                          {reminder.isDone ? 'Mark not done' : 'Mark done'}
-                        </Button>
 
                         {isOwnReminder && showReminderActions && (
-                          <>
+                          <div className="mt-2.5 flex flex-wrap gap-2">
                             <Button
                               size="sm"
                               variant="outline"
                               className="gap-2 rounded-xl"
-                              onClick={() => openEditReminder(reminder)}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                openEditReminder(reminder);
+                              }}
                             >
                               <Pencil className="h-4 w-4" />
                               Edit
@@ -1071,17 +1288,20 @@ export function PatientDashboard() {
                               size="sm"
                               variant="outline"
                               className="gap-2 rounded-xl text-destructive hover:text-destructive"
-                              onClick={() => handleDeleteReminder(reminder)}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                handleDeleteReminder(reminder);
+                              }}
                             >
                               <Trash2 className="h-4 w-4" />
                               Delete
                             </Button>
-                          </>
+                          </div>
                         )}
                       </div>
-                    </div>
-                  );
-                })
+                    );
+                  })}
+                </div>
               )}
             </div>
           </CardContent>
@@ -1167,23 +1387,63 @@ export function PatientDashboard() {
           <div className="space-y-4">
             <div className="space-y-2">
               <label className="text-sm font-medium">Title</label>
-              <Input
-                value={reminderForm.title}
-                onChange={(e) => setReminderForm((prev) => ({ ...prev, title: e.target.value }))}
-                placeholder="Choose or type a reminder"
-                list="patient-reminder-title-options"
-              />
-              <datalist id="patient-reminder-title-options">
-                {COMMON_REMINDER_TITLES.map((title) => (
-                  <option key={title} value={title} />
-                ))}
-              </datalist>
+              <div
+                className="relative"
+                onBlurCapture={(event) => {
+                  const nextTarget = event.relatedTarget as Node | null;
+                  if (!event.currentTarget.contains(nextTarget)) {
+                    setTitleSuggestionsOpen(false);
+                  }
+                }}
+              >
+                <Input
+                  value={reminderForm.title}
+                  onFocus={() => setTitleSuggestionsOpen(true)}
+                  onChange={(e) => {
+                    setReminderForm((prev) => ({ ...prev, title: e.target.value }));
+                    setTitleSuggestionsOpen(true);
+                  }}
+                  placeholder="Choose or type a reminder"
+                  className="pr-11"
+                />
+                <button
+                  type="button"
+                  className="absolute inset-y-0 right-0 flex w-11 items-center justify-center text-primary"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => setTitleSuggestionsOpen((prev) => !prev)}
+                >
+                  <ChevronDown className="h-4 w-4" />
+                </button>
+                {titleSuggestionsOpen && reminderTitleSuggestions.length > 0 && (
+                  <div className="absolute left-0 right-0 z-50 mt-2 overflow-hidden rounded-2xl border border-primary/20 bg-background shadow-[0_18px_45px_rgba(244,114,182,0.22)]">
+                    <div className="border-b border-primary/10 bg-primary/5 px-4 py-2 text-xs font-medium text-primary">
+                      Suggestions
+                    </div>
+                    <div className="max-h-72 overflow-y-auto p-2">
+                      {reminderTitleSuggestions.map((title) => (
+                        <button
+                          key={title}
+                          type="button"
+                          className="flex w-full items-center rounded-xl px-3 py-2.5 text-left text-sm font-medium text-foreground transition-colors hover:bg-primary/10 focus:bg-primary/10 focus:outline-none"
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => {
+                            setReminderForm((prev) => ({ ...prev, title }));
+                            setTitleSuggestionsOpen(false);
+                          }}
+                        >
+                          {title}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
 
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
                 <label className="text-sm font-medium">From date</label>
-                <Popover>
+                <Popover open={startDatePickerOpen} onOpenChange={setStartDatePickerOpen}>
                   <PopoverTrigger asChild>
                     <Button
                       type="button"
@@ -1198,12 +1458,14 @@ export function PatientDashboard() {
                     <DateCalendar
                       mode="single"
                       selected={parseStoredDate(reminderForm.startDate)}
-                      onSelect={(date) =>
+                      onSelect={(date) => {
+                        const nextStartDate = formatDateForInput(date);
                         setReminderForm((prev) => ({
                           ...prev,
-                          startDate: formatDateForInput(date),
-                        }))
-                      }
+                          ...normalizeReminderDateRange(nextStartDate, prev.endDate),
+                        }));
+                        setStartDatePickerOpen(false);
+                      }}
                       initialFocus
                     />
                   </PopoverContent>
@@ -1211,7 +1473,7 @@ export function PatientDashboard() {
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium">To date</label>
-                <Popover>
+                <Popover open={endDatePickerOpen} onOpenChange={setEndDatePickerOpen}>
                   <PopoverTrigger asChild>
                     <Button
                       type="button"
@@ -1226,12 +1488,14 @@ export function PatientDashboard() {
                     <DateCalendar
                       mode="single"
                       selected={parseStoredDate(reminderForm.endDate)}
-                      onSelect={(date) =>
+                      onSelect={(date) => {
+                        const nextEndDate = formatDateForInput(date);
                         setReminderForm((prev) => ({
                           ...prev,
-                          endDate: formatDateForInput(date),
-                        }))
-                      }
+                          ...normalizeReminderDateRange(prev.startDate, nextEndDate),
+                        }));
+                        setEndDatePickerOpen(false);
+                      }}
                       initialFocus
                     />
                   </PopoverContent>
@@ -1335,11 +1599,25 @@ export function PatientDashboard() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {confirmReminderAction?.type === 'delete' ? 'Delete reminder?' : 'Confirm reminder update?'}
+              {confirmReminderAction?.type === 'delete'
+                ? 'Delete reminder?'
+                : confirmReminderAction?.type === 'toggle'
+                  ? confirmReminderAction.isDone
+                    ? `Have you completed${
+                        confirmReminderAction.time ? ` the ${formatReminderTime(confirmReminderAction.time)} reminder` : ' this reminder'
+                      }?`
+                    : `Move${
+                        confirmReminderAction.time ? ` the ${formatReminderTime(confirmReminderAction.time)} reminder` : ' this reminder'
+                      } back to pending?`
+                  : 'Confirm reminder update?'}
             </AlertDialogTitle>
             <AlertDialogDescription>
               {confirmReminderAction?.type === 'delete'
                 ? 'This will permanently remove the reminder.'
+                : confirmReminderAction?.type === 'toggle'
+                  ? confirmReminderAction.isDone
+                    ? 'Only mark it as done if you have actually finished that scheduled reminder.'
+                    : 'That reminder time will show as pending again.'
                 : 'Your reminder changes will be saved after confirmation.'}
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -1359,10 +1637,20 @@ export function PatientDashboard() {
                   await deleteReminderRecord(action.reminder);
                   return;
                 }
+                if (action.type === 'toggle') {
+                  await toggleReminderStatus(action.reminder, action.isDone, action.time);
+                  return;
+                }
                 await persistReminder();
               }}
             >
-              {confirmReminderAction?.type === 'delete' ? 'Delete' : 'Confirm'}
+              {confirmReminderAction?.type === 'delete'
+                ? 'Delete'
+                : confirmReminderAction?.type === 'toggle'
+                  ? confirmReminderAction.isDone
+                    ? 'Yes, mark done'
+                    : 'Mark pending'
+                  : 'Confirm'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

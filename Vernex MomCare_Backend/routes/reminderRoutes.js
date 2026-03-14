@@ -23,11 +23,21 @@ const serializeReminder = (reminder) => ({
   startDate: reminder.startDate || null,
   endDate: reminder.endDate || null,
   notifyTimes: Array.isArray(reminder.notifyTimes) ? reminder.notifyTimes : [],
+  completedDate: reminder.completedDate || null,
+  completedTimes: Array.isArray(reminder.completedTimes) ? reminder.completedTimes : [],
   isDone: !!reminder.isDone,
   lastMarkedAt: reminder.lastMarkedAt || null,
   createdAt: reminder.createdAt,
   updatedAt: reminder.updatedAt,
 });
+
+const normalizeTimes = (values) =>
+  Array.isArray(values)
+    ? [...new Set(values.map((value) => String(value).trim()).filter(Boolean))].sort()
+    : [];
+
+const normalizeDateKey = (value) =>
+  typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : null;
 
 const getPatientAndDoctor = async (patientId) => {
   const patient = await Patient.findById(patientId);
@@ -128,9 +138,7 @@ router.post("/patient/:patientId", async (req, res) => {
       intervalLabel: String(intervalLabel).trim(),
       startDate: startDate ? new Date(startDate) : null,
       endDate: endDate ? new Date(endDate) : null,
-      notifyTimes: Array.isArray(notifyTimes)
-        ? notifyTimes.map((value) => String(value).trim()).filter(Boolean)
-        : [],
+      notifyTimes: normalizeTimes(notifyTimes),
     });
 
     await reminder.populate("patientId", "name");
@@ -173,7 +181,16 @@ router.put("/:reminderId", async (req, res) => {
       reminder.intervalLabel = intervalLabel.trim();
     }
     if (Array.isArray(notifyTimes)) {
-      reminder.notifyTimes = notifyTimes.map((value) => String(value).trim()).filter(Boolean);
+      reminder.notifyTimes = normalizeTimes(notifyTimes);
+      reminder.completedTimes = normalizeTimes(reminder.completedTimes).filter((value) =>
+        reminder.notifyTimes.includes(value)
+      );
+      reminder.isDone =
+        reminder.notifyTimes.length > 0 &&
+        reminder.completedTimes.length >= reminder.notifyTimes.length;
+      if (reminder.completedTimes.length === 0) {
+        reminder.lastMarkedAt = null;
+      }
     }
     if (startDate !== undefined) {
       reminder.startDate = startDate ? new Date(startDate) : null;
@@ -235,7 +252,7 @@ router.delete("/:reminderId", async (req, res) => {
 router.patch("/:reminderId/status", async (req, res) => {
   try {
     const { reminderId } = req.params;
-    const { patientId, isDone } = req.body;
+    const { patientId, isDone, time, dateKey } = req.body;
 
     const reminder = await Reminder.findById(reminderId);
     if (!reminder) {
@@ -249,8 +266,30 @@ router.patch("/:reminderId/status", async (req, res) => {
       });
     }
 
-    reminder.isDone = !!isDone;
-    reminder.lastMarkedAt = reminder.isDone ? new Date() : null;
+    const normalizedNotifyTimes = normalizeTimes(reminder.notifyTimes);
+    const normalizedDateKey =
+      normalizeDateKey(dateKey) || new Date().toISOString().slice(0, 10);
+    const targetTime = typeof time === "string" ? time.trim() : normalizedNotifyTimes[0] || "default";
+
+    if (normalizedNotifyTimes.length > 0 && !normalizedNotifyTimes.includes(targetTime)) {
+      return res.status(400).json({
+        success: false,
+        message: "Reminder time is invalid",
+      });
+    }
+
+    const sameDay = reminder.completedDate === normalizedDateKey;
+    const completedTimes = sameDay ? normalizeTimes(reminder.completedTimes) : [];
+
+    reminder.completedDate = normalizedDateKey;
+    reminder.completedTimes = !!isDone
+      ? normalizeTimes([...completedTimes, targetTime])
+      : completedTimes.filter((value) => value !== targetTime);
+    reminder.isDone =
+      normalizedNotifyTimes.length > 0
+        ? reminder.completedTimes.length >= normalizedNotifyTimes.length
+        : reminder.completedTimes.length > 0;
+    reminder.lastMarkedAt = reminder.completedTimes.length > 0 ? new Date() : null;
     await reminder.save();
     await reminder.populate("patientId", "name");
     await reminder.populate("doctorId", "name");

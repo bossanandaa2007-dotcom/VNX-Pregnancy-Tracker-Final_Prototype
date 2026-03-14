@@ -39,6 +39,34 @@ const navItems: NavItem[] = [
 
 type AppointmentApiShape = {
   status?: string;
+  date?: string;
+  time?: string;
+  doctorNotes?: string;
+};
+
+const parseAppointmentDateTime = (appointment: Pick<AppointmentApiShape, 'date' | 'time'>) => {
+  if (!appointment.date || !appointment.time) return null;
+
+  const [timePart, meridiem] = appointment.time.trim().split(' ');
+  if (!timePart || !meridiem) return null;
+
+  const [hoursText, minutesText] = timePart.split(':');
+  const hours = Number(hoursText);
+  const minutes = Number(minutesText);
+  if (Number.isNaN(hours) || Number.isNaN(minutes)) return null;
+
+  let normalizedHours = hours % 12;
+  if (meridiem.toUpperCase() === 'PM') normalizedHours += 12;
+
+  const value = new Date(`${appointment.date}T00:00:00`);
+  value.setHours(normalizedHours, minutes, 0, 0);
+  return value;
+};
+
+const isAwaitingDoctorNotes = (appointment: AppointmentApiShape, now: Date) => {
+  if (appointment.status !== 'approved' || appointment.doctorNotes) return false;
+  const appointmentDateTime = parseAppointmentDateTime(appointment);
+  return appointmentDateTime ? appointmentDateTime.getTime() <= now.getTime() : false;
 };
 
 export function DoctorSidebar() {
@@ -46,7 +74,7 @@ export function DoctorSidebar() {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
   const [unreadChatCount, setUnreadChatCount] = useState(0);
-  const [pendingAppointmentCount, setPendingAppointmentCount] = useState(0);
+  const [appointmentBadgeCount, setAppointmentBadgeCount] = useState(0);
   const [resolvedPhoto, setResolvedPhoto] = useState(user?.profilePhoto || '');
 
   useEffect(() => {
@@ -79,10 +107,14 @@ export function DoctorSidebar() {
           throw new Error(data?.message || 'Failed to fetch appointments');
         }
 
+        const now = new Date();
         const pendingCount = (data.appointments || []).filter(
           (appointment: AppointmentApiShape) => appointment.status === 'pending'
         ).length;
-        setPendingAppointmentCount(pendingCount);
+        const awaitingNotesCount = (data.appointments || []).filter((appointment: AppointmentApiShape) =>
+          isAwaitingDoctorNotes(appointment, now)
+        ).length;
+        setAppointmentBadgeCount(pendingCount + awaitingNotesCount);
       } catch (err) {
         console.error('Pending appointment count error:', err);
       }
@@ -172,7 +204,7 @@ export function DoctorSidebar() {
                   </span>
                 )}
 
-                {item.badgeType === 'appointments' && pendingAppointmentCount > 0 && (
+                {item.badgeType === 'appointments' && appointmentBadgeCount > 0 && (
                   <span
                     className="
                     flex h-5 min-w-[20px] items-center justify-center
@@ -180,7 +212,7 @@ export function DoctorSidebar() {
                     text-[11px] font-medium text-primary-foreground
                   "
                   >
-                    {pendingAppointmentCount}
+                    {appointmentBadgeCount}
                   </span>
                 )}
               </button>

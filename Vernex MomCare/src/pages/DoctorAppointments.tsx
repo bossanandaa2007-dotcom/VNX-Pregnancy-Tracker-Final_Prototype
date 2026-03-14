@@ -22,6 +22,7 @@ import {
   ChevronRight,
   Clock,
   FileText,
+  History,
 } from 'lucide-react';
 
 type AppointmentApiShape = {
@@ -123,11 +124,17 @@ export default function DoctorAppointments() {
   const [loading, setLoading] = useState(false);
   const [savingNotes, setSavingNotes] = useState(false);
   const [view, setView] = useState<'list' | 'calendar'>('list');
+  const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
+  const [historyPatientFilter, setHistoryPatientFilter] = useState<'all' | string>('all');
+  const [historyMonthFilter, setHistoryMonthFilter] = useState<'all' | string>('all');
+  const [historyYearFilter, setHistoryYearFilter] = useState<'all' | string>('all');
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [notesModalOpen, setNotesModalOpen] = useState(false);
+  const [rejectModalOpen, setRejectModalOpen] = useState(false);
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
   const [doctorNotesDraft, setDoctorNotesDraft] = useState('');
+  const [rejectionNoteDraft, setRejectionNoteDraft] = useState('');
 
   const today = new Date().toISOString().split('T')[0];
 
@@ -157,12 +164,12 @@ export default function DoctorAppointments() {
     loadAppointments();
   }, [toast, user?.id, user?.role]);
 
-  const updateStatus = async (id: string | number, status: 'approved' | 'rejected') => {
+  const updateStatus = async (id: string | number, status: 'approved' | 'rejected', doctorNotes = '') => {
     try {
       const res = await fetch(`${API_BASE}/api/appointments/${id}/status`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status }),
+        body: JSON.stringify({ status, doctorNotes }),
       });
       const data = await res.json();
       if (!res.ok || !data?.success) {
@@ -184,6 +191,20 @@ export default function DoctorAppointments() {
         variant: 'destructive',
       });
     }
+  };
+
+  const openRejectModal = (appointment: Appointment) => {
+    setSelectedAppointment(appointment);
+    setRejectionNoteDraft('');
+    setRejectModalOpen(true);
+  };
+
+  const confirmRejectAppointment = async () => {
+    if (!selectedAppointment) return;
+    await updateStatus(selectedAppointment.id, 'rejected', rejectionNoteDraft.trim());
+    setRejectModalOpen(false);
+    setSelectedAppointment(null);
+    setRejectionNoteDraft('');
   };
 
   const openNotesModal = (appointment: Appointment) => {
@@ -276,6 +297,38 @@ export default function DoctorAppointments() {
         .sort((a, b) => `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`)),
     [appointments]
   );
+  const historyPatientOptions = useMemo(() => {
+    const uniqueNames = Array.from(new Set(history.map((appt) => appt.patientName).filter(Boolean)));
+    return uniqueNames.sort((a, b) => a.localeCompare(b));
+  }, [history]);
+  const historyMonthOptions = useMemo(() => {
+    const uniqueMonths = Array.from(
+      new Set(
+        history
+          .map((appt) => appt.date.slice(5, 7))
+          .filter((value) => value.length === 2)
+      )
+    );
+    return uniqueMonths.sort((a, b) => a.localeCompare(b));
+  }, [history]);
+  const historyYearOptions = useMemo(() => {
+    const uniqueYears = Array.from(
+      new Set(
+        history
+          .map((appt) => appt.date.slice(0, 4))
+          .filter((value) => value.length === 4)
+      )
+    );
+    return uniqueYears.sort((a, b) => b.localeCompare(a));
+  }, [history]);
+  const filteredHistory = useMemo(() => {
+    return history.filter((appt) => {
+      if (historyPatientFilter !== 'all' && appt.patientName !== historyPatientFilter) return false;
+      if (historyMonthFilter !== 'all' && appt.date.slice(5, 7) !== historyMonthFilter) return false;
+      if (historyYearFilter !== 'all' && appt.date.slice(0, 4) !== historyYearFilter) return false;
+      return true;
+    });
+  }, [history, historyMonthFilter, historyPatientFilter, historyYearFilter]);
 
   const year = currentMonth.getFullYear();
   const month = currentMonth.getMonth();
@@ -302,7 +355,7 @@ export default function DoctorAppointments() {
               {loading && <p className="mt-1 text-xs text-muted-foreground">Loading appointments...</p>}
             </div>
 
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <Button size="sm" variant={view === 'list' ? 'default' : 'outline'} onClick={() => setView('list')}>
                 List
               </Button>
@@ -314,6 +367,15 @@ export default function DoctorAppointments() {
               >
                 <CalendarDays className="h-4 w-4" />
                 Calendar
+              </Button>
+              <Button
+                size="sm"
+                variant={historyDialogOpen ? 'default' : 'outline'}
+                onClick={() => setHistoryDialogOpen(true)}
+                className="gap-2"
+              >
+                <History className="h-4 w-4" />
+                History
               </Button>
             </div>
           </div>
@@ -333,7 +395,7 @@ export default function DoctorAppointments() {
                         <Button size="sm" onClick={() => updateStatus(appt.id, 'approved')}>
                           Approve
                         </Button>
-                        <Button size="sm" variant="destructive" onClick={() => updateStatus(appt.id, 'rejected')}>
+                        <Button size="sm" variant="destructive" onClick={() => openRejectModal(appt)}>
                           Reject
                         </Button>
                       </div>
@@ -399,21 +461,6 @@ export default function DoctorAppointments() {
               )}
             </section>
 
-            <section className="space-y-4">
-              <h2 className="text-lg font-semibold">History</h2>
-
-              {history.length > 0 ? (
-                history.map((appt) => (
-                  <Card key={String(appt.id)}>
-                    <CardContent className="p-5">
-                      <AppointmentMeta appointment={appt} />
-                    </CardContent>
-                  </Card>
-                ))
-              ) : (
-                <EmptyPlaceholder text="No appointment history yet." />
-              )}
-            </section>
           </div>
         )}
 
@@ -530,6 +577,124 @@ export default function DoctorAppointments() {
               {savingNotes ? 'Saving...' : 'Save Notes'}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={rejectModalOpen}
+        onOpenChange={(open) => {
+          setRejectModalOpen(open);
+          if (!open) {
+            setSelectedAppointment(null);
+            setRejectionNoteDraft('');
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Reject Appointment</DialogTitle>
+            <DialogDescription>
+              Add an optional note so the patient understands why this appointment was rejected.
+            </DialogDescription>
+          </DialogHeader>
+
+          {selectedAppointment && (
+            <div className="space-y-4">
+              <div className="rounded-lg bg-accent/40 p-3 text-sm">
+                <p className="font-medium">{selectedAppointment.patientName}</p>
+                <p className="text-muted-foreground">
+                  {selectedAppointment.date} · {selectedAppointment.time}
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="rejection-note">Rejection note</Label>
+                <Textarea
+                  id="rejection-note"
+                  placeholder="Optional reason, reschedule suggestion, or next step"
+                  value={rejectionNoteDraft}
+                  onChange={(e) => setRejectionNoteDraft(e.target.value)}
+                />
+              </div>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRejectModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={confirmRejectAppointment}>
+              Reject Appointment
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={historyDialogOpen} onOpenChange={setHistoryDialogOpen}>
+        <DialogContent className="max-h-[85vh] overflow-hidden sm:max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>Appointment History</DialogTitle>
+            <DialogDescription>
+              Review completed appointments using patient and month/year filters.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex flex-wrap gap-3">
+            <select
+              value={historyPatientFilter}
+              onChange={(e) => setHistoryPatientFilter(e.target.value)}
+              className="rounded-lg border border-primary/20 bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary"
+            >
+              <option value="all">All patients</option>
+              {historyPatientOptions.map((patientName) => (
+                <option key={patientName} value={patientName}>
+                  {patientName}
+                </option>
+              ))}
+            </select>
+            <select
+              value={historyMonthFilter}
+              onChange={(e) => setHistoryMonthFilter(e.target.value)}
+              className="rounded-lg border border-primary/20 bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary"
+            >
+              <option value="all">All months</option>
+              {historyMonthOptions.map((month) => (
+                <option key={month} value={month}>
+                  {new Date(`2000-${month}-01T00:00:00`).toLocaleDateString('en-US', {
+                    month: 'long',
+                  })}
+                </option>
+              ))}
+            </select>
+            <select
+              value={historyYearFilter}
+              onChange={(e) => setHistoryYearFilter(e.target.value)}
+              className="rounded-lg border border-primary/20 bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary"
+            >
+              <option value="all">All years</option>
+              {historyYearOptions.map((yearValue) => (
+                <option key={yearValue} value={yearValue}>
+                  {yearValue}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="max-h-[58vh] overflow-y-auto pr-2">
+            <div className="space-y-4">
+              {filteredHistory.length > 0 ? (
+                filteredHistory.map((appt) => (
+                  <Card key={String(appt.id)}>
+                    <CardContent className="p-5">
+                      <AppointmentMeta appointment={appt} />
+                    </CardContent>
+                  </Card>
+                ))
+              ) : (
+                <EmptyPlaceholder text="No history matches the selected filters." />
+              )}
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </DashboardLayout>

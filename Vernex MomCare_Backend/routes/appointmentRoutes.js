@@ -165,6 +165,8 @@ router.put("/:appointmentId/status", async (req, res) => {
   try {
     const { appointmentId } = req.params;
     const { status } = req.body;
+    const doctorNotes =
+      typeof req.body?.doctorNotes === "string" ? req.body.doctorNotes.trim() : "";
 
     if (!MUTABLE_STATUSES.has(status)) {
       return res.status(400).json({
@@ -189,6 +191,9 @@ router.put("/:appointmentId/status", async (req, res) => {
     }
 
     appointment.status = status;
+    if (status === "rejected") {
+      appointment.doctorNotes = doctorNotes;
+    }
     if (status !== "completed") {
       appointment.completedAt = null;
     }

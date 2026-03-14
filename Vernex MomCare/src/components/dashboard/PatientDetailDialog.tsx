@@ -38,6 +38,7 @@
   import {
     User,
     Calendar,
+    ChevronDown,
     Phone,
     Mail,
     FileText,
@@ -89,6 +90,14 @@
     'Morning walk',
     'Check blood pressure',
     'Take calcium tablet',
+    'Track baby movements',
+    'Eat healthy snacks',
+    'Take folic acid',
+    'Do breathing exercises',
+    'Check blood sugar',
+    'Attend doctor appointment',
+    'Get enough rest',
+    'Take evening medicine',
   ];
   const pad2 = (n: number) => n.toString().padStart(2, '0');
   const formatDesktopTimeInputValue = (value: string) => {
@@ -142,6 +151,83 @@
       ? date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
       : fallback;
   };
+  const formatReminderActiveRange = (startDate?: string, endDate?: string) => {
+    if (!startDate && !endDate) return '';
+
+    const startLabel = startDate ? formatReminderDateLabel(startDate, 'Today') : 'Today';
+    const endLabel = endDate ? formatReminderDateLabel(endDate, 'Ongoing') : 'Ongoing';
+
+    if (startDate && endDate) {
+      return startLabel === endLabel ? startLabel : `${startLabel} - ${endLabel}`;
+    }
+
+    if (endDate) return `Until ${endLabel}`;
+    return `From ${startLabel}`;
+  };
+  const normalizeReminderDateRange = (startDate?: string, endDate?: string) => {
+    if (startDate && endDate && startDate > endDate) {
+      return { startDate: endDate, endDate: startDate };
+    }
+    return { startDate: startDate || '', endDate: endDate || '' };
+  };
+  const isReminderVisibleOnDate = (reminder: HealthReminder, dateKey: string) => {
+    const startDate = reminder.startDate ? String(reminder.startDate).slice(0, 10) : '';
+    const endDate = reminder.endDate ? String(reminder.endDate).slice(0, 10) : '';
+
+    if (startDate && startDate > dateKey) return false;
+    if (endDate && endDate < dateKey) return false;
+    return true;
+  };
+  const getReminderTitleSuggestions = (
+    reminders: HealthReminder[],
+    query: string,
+    defaultTitles: string[],
+    limit = 8
+  ) => {
+    const normalizedQuery = query.trim().toLowerCase();
+    const recentTitles = reminders
+      .slice()
+      .sort((a, b) => {
+        const aTime = new Date(a.updatedAt || a.lastMarkedAt || a.createdAt || 0).getTime();
+        const bTime = new Date(b.updatedAt || b.lastMarkedAt || b.createdAt || 0).getTime();
+        return bTime - aTime;
+      })
+      .map((reminder) => reminder.title.trim())
+      .filter(Boolean);
+
+    const seen = new Set<string>();
+    return [...recentTitles, ...defaultTitles]
+      .filter((title) => {
+        const key = title.toLowerCase();
+        if (seen.has(key)) return false;
+        if (normalizedQuery && !key.includes(normalizedQuery)) return false;
+        seen.add(key);
+        return true;
+      })
+      .slice(0, limit);
+  };
+  const getReminderCompletedTimes = (reminder: HealthReminder) =>
+    Array.isArray(reminder.completedTimes) ? reminder.completedTimes : [];
+  const getReminderProgressLabel = (reminder: HealthReminder) => {
+    const totalCount = reminder.totalCount || Math.max(reminder.notifyTimes?.length || 0, 1);
+    const completionCount = reminder.completionCount || 0;
+
+    if (completionCount <= 0) return 'Pending';
+    if (completionCount >= totalCount) return 'Done';
+    return `${completionCount}/${totalCount} done`;
+  };
+  const getReminderStatusClassName = (reminder: HealthReminder) => {
+    const totalCount = reminder.totalCount || Math.max(reminder.notifyTimes?.length || 0, 1);
+    const completionCount = reminder.completionCount || 0;
+
+    if (completionCount >= totalCount) {
+      return 'border-success/20 bg-success/10 text-success';
+    }
+    if (completionCount > 0) {
+      return 'border-sky-200 bg-sky-100 text-sky-700';
+    }
+    return 'border-warning/20 bg-warning/10 text-warning';
+  };
   const MOBILE_PICKER_HOURS = Array.from({ length: 12 }, (_, index) =>
     String(index + 1).padStart(2, '0')
   );
@@ -171,6 +257,9 @@
     const [showReminderForm, setShowReminderForm] = useState(false);
     const [confirmReminderAction, setConfirmReminderAction] = useState<ReminderConfirmAction>(null);
     const [mobileTimePickerOpen, setMobileTimePickerOpen] = useState(false);
+    const [startDatePickerOpen, setStartDatePickerOpen] = useState(false);
+    const [endDatePickerOpen, setEndDatePickerOpen] = useState(false);
+    const [titleSuggestionsOpen, setTitleSuggestionsOpen] = useState(false);
     const [reminderForm, setReminderForm] = useState({
       title: '',
       notifyTimeInput: '',
@@ -182,6 +271,15 @@
       endDate: '',
       details: '',
     });
+    const reminderTitleSuggestions = useMemo(
+      () => getReminderTitleSuggestions(reminders, reminderForm.title, COMMON_REMINDER_TITLES),
+      [reminders, reminderForm.title]
+    );
+    const visibleReminders = useMemo(() => {
+      const today = new Date();
+      const todayKey = `${today.getFullYear()}-${pad2(today.getMonth() + 1)}-${pad2(today.getDate())}`;
+      return reminders.filter((reminder) => isReminderVisibleOnDate(reminder, todayKey));
+    }, [reminders]);
     const mobileHourRef = useRef<HTMLDivElement>(null);
     const mobileMinuteRef = useRef<HTMLDivElement>(null);
     const mobileMeridiemRef = useRef<HTMLDivElement>(null);
@@ -285,6 +383,9 @@
     const openCreateReminder = () => {
       setEditingReminderId(null);
       setShowReminderForm(true);
+      setStartDatePickerOpen(false);
+      setEndDatePickerOpen(false);
+      setTitleSuggestionsOpen(false);
       setReminderForm({
         title: '',
         notifyTimeInput: '',
@@ -301,6 +402,9 @@
     const openEditReminder = (reminder: HealthReminder) => {
       setEditingReminderId(String(reminder._id || reminder.id || ''));
       setShowReminderForm(true);
+      setStartDatePickerOpen(false);
+      setEndDatePickerOpen(false);
+      setTitleSuggestionsOpen(false);
       setReminderForm({
         title: reminder.title || '',
         notifyTimeInput: '',
@@ -358,6 +462,9 @@
         );
         setEditingReminderId(null);
         setShowReminderForm(false);
+        setStartDatePickerOpen(false);
+        setEndDatePickerOpen(false);
+        setTitleSuggestionsOpen(false);
         setReminderForm({
           title: '',
           notifyTimeInput: '',
@@ -740,19 +847,59 @@
                 <CardContent className="space-y-4">
                   {showReminderForm && (
                     <div className="grid gap-3 rounded-xl border p-4">
-                      <Input
-                        placeholder="Choose or type a reminder"
-                        value={reminderForm.title}
-                        onChange={(e) => setReminderForm((prev) => ({ ...prev, title: e.target.value }))}
-                        list="doctor-reminder-title-options"
-                      />
-                      <datalist id="doctor-reminder-title-options">
-                        {COMMON_REMINDER_TITLES.map((title) => (
-                          <option key={title} value={title} />
-                        ))}
-                      </datalist>
+                      <div
+                        className="relative"
+                        onBlurCapture={(event) => {
+                          const nextTarget = event.relatedTarget as Node | null;
+                          if (!event.currentTarget.contains(nextTarget)) {
+                            setTitleSuggestionsOpen(false);
+                          }
+                        }}
+                      >
+                        <Input
+                          placeholder="Choose or type a reminder"
+                          value={reminderForm.title}
+                          onFocus={() => setTitleSuggestionsOpen(true)}
+                          onChange={(e) => {
+                            setReminderForm((prev) => ({ ...prev, title: e.target.value }));
+                            setTitleSuggestionsOpen(true);
+                          }}
+                          className="pr-11"
+                        />
+                        <button
+                          type="button"
+                          className="absolute inset-y-0 right-0 flex w-11 items-center justify-center text-primary"
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => setTitleSuggestionsOpen((prev) => !prev)}
+                        >
+                          <ChevronDown className="h-4 w-4" />
+                        </button>
+                        {titleSuggestionsOpen && reminderTitleSuggestions.length > 0 && (
+                          <div className="absolute left-0 right-0 z-50 mt-2 overflow-hidden rounded-2xl border border-primary/20 bg-background shadow-[0_18px_45px_rgba(244,114,182,0.22)]">
+                            <div className="border-b border-primary/10 bg-primary/5 px-4 py-2 text-xs font-medium text-primary">
+                              Suggestions
+                            </div>
+                            <div className="max-h-72 overflow-y-auto p-2">
+                              {reminderTitleSuggestions.map((title) => (
+                                <button
+                                  key={title}
+                                  type="button"
+                                  className="flex w-full items-center rounded-xl px-3 py-2.5 text-left text-sm font-medium text-foreground transition-colors hover:bg-primary/10 focus:bg-primary/10 focus:outline-none"
+                                  onMouseDown={(event) => event.preventDefault()}
+                                  onClick={() => {
+                                    setReminderForm((prev) => ({ ...prev, title }));
+                                    setTitleSuggestionsOpen(false);
+                                  }}
+                                >
+                                  {title}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
                       <div className="grid grid-cols-2 gap-3">
-                        <Popover>
+                        <Popover open={startDatePickerOpen} onOpenChange={setStartDatePickerOpen}>
                           <PopoverTrigger asChild>
                             <Button
                               type="button"
@@ -767,17 +914,19 @@
                             <DateCalendar
                               mode="single"
                               selected={parseStoredDate(reminderForm.startDate)}
-                              onSelect={(date) =>
+                              onSelect={(date) => {
+                                const nextStartDate = formatDateForInput(date);
                                 setReminderForm((prev) => ({
                                   ...prev,
-                                  startDate: formatDateForInput(date),
-                                }))
-                              }
+                                  ...normalizeReminderDateRange(nextStartDate, prev.endDate),
+                                }));
+                                setStartDatePickerOpen(false);
+                              }}
                               initialFocus
                             />
                           </PopoverContent>
                         </Popover>
-                        <Popover>
+                        <Popover open={endDatePickerOpen} onOpenChange={setEndDatePickerOpen}>
                           <PopoverTrigger asChild>
                             <Button
                               type="button"
@@ -792,12 +941,14 @@
                             <DateCalendar
                               mode="single"
                               selected={parseStoredDate(reminderForm.endDate)}
-                              onSelect={(date) =>
+                              onSelect={(date) => {
+                                const nextEndDate = formatDateForInput(date);
                                 setReminderForm((prev) => ({
                                   ...prev,
-                                  endDate: formatDateForInput(date),
-                                }))
-                              }
+                                  ...normalizeReminderDateRange(prev.startDate, nextEndDate),
+                                }));
+                                setEndDatePickerOpen(false);
+                              }}
                               initialFocus
                             />
                           </PopoverContent>
@@ -902,57 +1053,69 @@
                     <div className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground">
                       Loading reminders...
                     </div>
-                  ) : reminders.length === 0 ? (
+                  ) : visibleReminders.length === 0 ? (
                     <div className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground">
-                      No reminders set for this patient yet.
+                      No active reminders for this patient right now.
                     </div>
                   ) : (
                     <div className="space-y-3">
-                      {reminders.map((reminder) => {
+                      {visibleReminders.map((reminder) => {
                         const reminderId = String(reminder._id || reminder.id || '');
                         const doctorOwned = reminder.createdByRole === 'doctor';
+                        const activeRangeLabel = formatReminderActiveRange(reminder.startDate, reminder.endDate);
+                        const completedTimes = getReminderCompletedTimes(reminder);
                         return (
-                          <div key={reminderId} className="rounded-xl border p-4">
+                          <div key={reminderId} className="rounded-xl border p-3.5">
                             <div className="flex flex-wrap items-center justify-between gap-2">
-                              <div>
-                                <p className="font-medium">{reminder.title}</p>
-                                <p className="text-sm text-muted-foreground">{reminder.intervalLabel}</p>
-                                {(reminder.startDate || reminder.endDate) && (
-                                  <p className="mt-1 text-[11px] text-muted-foreground">
-                                    Active:{' '}
-                                    {reminder.startDate ? new Date(reminder.startDate).toLocaleDateString() : 'Now'}
-                                    {' '}to{' '}
-                                    {reminder.endDate ? new Date(reminder.endDate).toLocaleDateString() : 'Ongoing'}
-                                  </p>
-                                )}
+                              <div className="min-w-0 flex-1">
+                                <p className="truncate font-medium" title={reminder.title}>{reminder.title}</p>
+                                <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
+                                  <span>{reminder.intervalLabel}</span>
+                                  {activeRangeLabel && <span>{activeRangeLabel}</span>}
+                                </div>
                               </div>
                               <div className="flex flex-wrap items-center gap-2">
                                 <Badge variant="outline">
-                                  {doctorOwned ? 'Doctor set' : 'Patient set'}
+                                  {doctorOwned ? 'Doctor' : 'Patient'}
                                 </Badge>
                                 <Badge
                                   variant="outline"
-                                  className={cn(
-                                    reminder.isDone
-                                      ? 'border-success/20 bg-success/10 text-success'
-                                      : 'border-warning/20 bg-warning/10 text-warning'
-                                  )}
+                                  className={cn(getReminderStatusClassName(reminder))}
                                 >
-                                  {reminder.isDone ? 'Done' : 'Not done'}
+                                  {getReminderProgressLabel(reminder)}
                                 </Badge>
                               </div>
                             </div>
+                            {Array.isArray(reminder.notifyTimes) && reminder.notifyTimes.length > 1 && (
+                              <div className="mt-2 flex flex-wrap gap-2">
+                                {reminder.notifyTimes.map((time) => (
+                                  <span
+                                    key={time}
+                                    className={cn(
+                                      'rounded-lg border px-2.5 py-1 text-[11px] font-medium',
+                                      completedTimes.includes(time)
+                                        ? 'border-green-200 bg-green-100 text-green-700'
+                                        : 'border-amber-200 bg-amber-50 text-amber-700'
+                                    )}
+                                  >
+                                    {formatReminderTime(time)} {completedTimes.includes(time) ? 'done' : 'pending'}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
                             {reminder.details && (
-                              <p className="mt-2 text-sm text-muted-foreground">{reminder.details}</p>
+                              <p className="mt-1 truncate text-sm text-muted-foreground" title={reminder.details}>
+                                Note: {reminder.details}
+                              </p>
                             )}
                             {reminder.lastMarkedAt && (
-                              <p className="mt-2 text-xs text-muted-foreground">
+                              <p className="mt-1 text-xs text-muted-foreground">
                                 Patient updated: {new Date(reminder.lastMarkedAt).toLocaleString()}
                               </p>
                             )}
 
                             {doctorOwned && (
-                              <div className="mt-3 flex gap-2">
+                              <div className="mt-2.5 flex gap-2">
                                 <Button
                                   variant="outline"
                                   size="sm"
