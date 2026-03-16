@@ -22,6 +22,7 @@ import {
   ChevronLeft,
   ChevronRight,
   FileText,
+  History,
 } from 'lucide-react';
 import { Appointment, AppointmentStatus } from '@/types/appointment';
 import { API_BASE } from '@/config/api';
@@ -154,7 +155,11 @@ export default function Appointments() {
 
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<'list' | 'calendar'>('list');
+  const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [historyStatusFilter, setHistoryStatusFilter] = useState<'all' | 'completed' | 'rejected'>('all');
+  const [historyMonthFilter, setHistoryMonthFilter] = useState<'all' | string>('all');
+  const [historySort, setHistorySort] = useState<'newest' | 'oldest'>('newest');
   const currentDateTime = new Date();
 
   const now = new Date();
@@ -280,10 +285,28 @@ export default function Appointments() {
   const historyAppointments = useMemo(
     () =>
       appointments
-        .filter((appt) => appt.status === 'completed' && appt.doctorNotes)
+        .filter((appt) => appt.status === 'completed' || appt.status === 'rejected')
         .sort((a, b) => `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`)),
     [appointments]
   );
+  const historyMonthOptions = useMemo(() => {
+    const uniqueMonths = Array.from(new Set(historyAppointments.map((appt) => appt.date.slice(0, 7)).filter(Boolean)));
+    return uniqueMonths.sort((a, b) => b.localeCompare(a));
+  }, [historyAppointments]);
+  const filteredHistoryAppointments = useMemo(() => {
+    const filtered = historyAppointments.filter((appt) => {
+      if (historyStatusFilter !== 'all' && appt.status !== historyStatusFilter) return false;
+      if (historyMonthFilter !== 'all' && appt.date.slice(0, 7) !== historyMonthFilter) return false;
+      return true;
+    });
+
+    const sorted = [...filtered].sort((a, b) => {
+      const comparison = `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`);
+      return historySort === 'newest' ? comparison : -comparison;
+    });
+
+    return sorted;
+  }, [historyAppointments, historyMonthFilter, historySort, historyStatusFilter]);
 
   const handleBookAppointment = async () => {
     if (!user?.id || !form.date || !form.time) return;
@@ -365,6 +388,15 @@ export default function Appointments() {
                 <Plus className="h-4 w-4" />
                 Book
               </Button>
+              <Button
+                variant={historyDialogOpen ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setHistoryDialogOpen(true)}
+                className="gap-2"
+              >
+                <History className="h-4 w-4" />
+                History
+              </Button>
             </div>
           </div>
         </div>
@@ -428,25 +460,6 @@ export default function Appointments() {
               )}
             </section>
 
-            <section className="space-y-4">
-              <h2 className="text-lg font-semibold">History</h2>
-
-              {historyAppointments.length === 0 ? (
-                <EmptyCard text="Completed appointments with doctor notes will appear here." />
-              ) : (
-                historyAppointments.map((appt) => (
-                  <Card key={String(appt.id)}>
-                    <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-start sm:justify-between">
-                      <AppointmentSummary appointment={appt} />
-                      <div className="flex items-center gap-2 text-xs font-medium text-primary">
-                        <FileText className="h-4 w-4" />
-                        History
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))
-              )}
-            </section>
           </div>
         )}
 
@@ -574,6 +587,69 @@ export default function Appointments() {
               <Button className="w-full" onClick={handleBookAppointment} disabled={submitting}>
                 {submitting ? 'Submitting...' : 'Confirm Appointment'}
               </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={historyDialogOpen} onOpenChange={setHistoryDialogOpen}>
+          <DialogContent className="max-h-[85vh] overflow-hidden sm:max-w-4xl">
+            <DialogHeader>
+              <DialogTitle>Appointment History</DialogTitle>
+            </DialogHeader>
+
+            <div className="flex flex-wrap gap-2">
+              <select
+                value={historyStatusFilter}
+                onChange={(e) => setHistoryStatusFilter(e.target.value as typeof historyStatusFilter)}
+                className="rounded-lg border border-primary/20 bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary"
+              >
+                <option value="all">All status</option>
+                <option value="completed">Completed</option>
+                <option value="rejected">Rejected</option>
+              </select>
+              <select
+                value={historyMonthFilter}
+                onChange={(e) => setHistoryMonthFilter(e.target.value)}
+                className="rounded-lg border border-primary/20 bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary"
+              >
+                <option value="all">All months</option>
+                {historyMonthOptions.map((month) => (
+                  <option key={month} value={month}>
+                    {new Date(`${month}-01T00:00:00`).toLocaleDateString('en-US', {
+                      month: 'long',
+                      year: 'numeric',
+                    })}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={historySort}
+                onChange={(e) => setHistorySort(e.target.value as typeof historySort)}
+                className="rounded-lg border border-primary/20 bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary"
+              >
+                <option value="newest">Newest first</option>
+                <option value="oldest">Oldest first</option>
+              </select>
+            </div>
+
+            <div className="max-h-[58vh] overflow-y-auto pr-2">
+              <div className="space-y-4">
+                {filteredHistoryAppointments.length === 0 ? (
+                  <EmptyCard text="No history matches the selected filters." />
+                ) : (
+                  filteredHistoryAppointments.map((appt) => (
+                    <Card key={String(appt.id)}>
+                      <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-start sm:justify-between">
+                        <AppointmentSummary appointment={appt} />
+                        <div className="flex items-center gap-2 text-xs font-medium text-primary">
+                          <FileText className="h-4 w-4" />
+                          History
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))
+                )}
+              </div>
             </div>
           </DialogContent>
         </Dialog>

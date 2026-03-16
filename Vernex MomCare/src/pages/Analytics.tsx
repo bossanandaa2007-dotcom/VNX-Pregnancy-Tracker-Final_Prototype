@@ -362,9 +362,9 @@ export default function Analytics() {
   const navigate = useNavigate();
   const isMobile = useIsMobile();
 
-  const isDoctor = user?.role === 'doctor';
-  const isDoctorView = isDoctor && !!patientId;
-  const targetPatientId = isDoctorView ? patientId ?? '' : user?.id ?? '';
+  const isReadOnlyPatientView =
+    (user?.role === 'doctor' || user?.role === 'admin') && !!patientId;
+  const targetPatientId = isReadOnlyPatientView ? patientId ?? '' : user?.id ?? '';
 
   const [isAnalyticsLoading, setIsAnalyticsLoading] = useState(false);
   const [analyticsError, setAnalyticsError] = useState<string | null>(null);
@@ -684,7 +684,7 @@ export default function Analytics() {
   };
 
   const handleAddWaterLog = async () => {
-    if (isDoctorView || !targetPatientId) return;
+    if (isReadOnlyPatientView || !targetPatientId) return;
 
     const amountMl = Number(waterForm.amountMl);
     if (!Number.isFinite(amountMl) || amountMl <= 0) return;
@@ -711,7 +711,7 @@ export default function Analytics() {
   };
 
   const handleAddWeightEntry = async () => {
-    if (isDoctorView || !targetPatientId) return;
+    if (isReadOnlyPatientView || !targetPatientId) return;
 
     const valueKg = Number(weightForm.valueKg);
     if (!Number.isFinite(valueKg) || valueKg <= 0) return;
@@ -738,7 +738,7 @@ export default function Analytics() {
   };
 
   const handleAddSymptom = () => {
-    if (isDoctorView || !symptomForm.symptom.trim()) {
+    if (isReadOnlyPatientView || !symptomForm.symptom.trim()) {
       return;
     }
 
@@ -802,7 +802,7 @@ export default function Analytics() {
           detailItems={getTrackerDetailItems(selectedTracker.trackerId)}
         />
 
-        {selectedTracker.trackerId === 'waterIntake' && !isDoctorView && (
+        {selectedTracker.trackerId === 'waterIntake' && !isReadOnlyPatientView && (
           <Card className="border-dashed">
             <CardHeader>
               <CardTitle className="text-base">Add Water Log</CardTitle>
@@ -862,7 +862,7 @@ export default function Analytics() {
           </Card>
         )}
 
-        {selectedTracker.trackerId === 'weight' && !isDoctorView && (
+        {selectedTracker.trackerId === 'weight' && !isReadOnlyPatientView && (
           <Card className="border-dashed">
             <CardHeader>
               <CardTitle className="text-base">Add Weight Entry</CardTitle>
@@ -928,21 +928,21 @@ export default function Analytics() {
   return (
     <DashboardLayout>
       <div className="space-y-8">
-        {isDoctorView && (
+        {isReadOnlyPatientView && (
           <Button
             variant="ghost"
             className="flex items-center gap-2"
-            onClick={() => navigate('/doctor/analytics')}
+            onClick={() => navigate(-1)}
           >
             <ArrowLeft className="h-4 w-4" />
-            Back to Patient List
+            Back
           </Button>
         )}
 
         <div className="space-y-1">
           <h1 className="text-2xl font-bold">Health Analytics</h1>
           <p className="text-muted-foreground">
-            {isDoctorView
+            {isReadOnlyPatientView
               ? 'Read-only view of patient health metrics'
               : 'Track your pregnancy health journey'}
           </p>
@@ -1008,7 +1008,7 @@ export default function Analytics() {
             title="Symptoms"
             description="Capture symptom notes with severity and quick suggestions while keeping doctor views read-only."
             action={
-              !isDoctorView ? (
+              !isReadOnlyPatientView ? (
                 <Button size="sm" className="gap-2" onClick={() => setOpenSymptomModal(true)}>
                   <Plus className="h-4 w-4" />
                   Add Symptom

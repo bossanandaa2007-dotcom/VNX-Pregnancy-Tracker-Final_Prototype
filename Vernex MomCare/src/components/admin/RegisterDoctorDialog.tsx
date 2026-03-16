@@ -35,7 +35,7 @@ export function RegisterDoctorDialog({
   const { toast } = useToast();
 
   const [form, setForm] = useState({
-    name: '',
+    name: 'Dr. ',
     email: '',
     password: '',
     specialty: '',
@@ -119,7 +119,7 @@ export function RegisterDoctorDialog({
 
   const handleClose = () => {
     setForm({
-      name: '',
+      name: 'Dr. ',
       email: '',
       password: '',
       specialty: '',
@@ -145,7 +145,7 @@ export function RegisterDoctorDialog({
             <div>
               <Label>Doctor Name *</Label>
               <Input
-                placeholder="Dr. Full Name"
+                placeholder="Full Name"
                 value={form.name}
                 onChange={(e) => handleChange('name', e.target.value)}
               />

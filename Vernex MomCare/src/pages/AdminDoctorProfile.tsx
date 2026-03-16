@@ -44,6 +44,20 @@ interface ApprovalHistory {
   payload?: any;
 }
 
+const getMonthKey = (value?: string) => {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+};
+
+const getYearKey = (value?: string) => {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return String(date.getFullYear());
+};
+
 const approvalTypeLabel: Record<ApprovalHistory['requestType'], string> = {
   patient_create: 'Patient Create',
   guide_create: 'Guide Create',
@@ -64,10 +78,12 @@ export default function AdminDoctorProfile() {
   const [loading, setLoading] = useState(false);
   const [activeSection, setActiveSection] = useState<'appointments' | 'approvals' | null>(null);
   const [appointmentStatusFilter, setAppointmentStatusFilter] = useState<'all' | 'pending' | 'approved' | 'rejected' | 'completed'>('all');
-  const [appointmentSort, setAppointmentSort] = useState<'newest' | 'oldest'>('newest');
+  const [appointmentMonthFilter, setAppointmentMonthFilter] = useState<'all' | string>('all');
+  const [appointmentYearFilter, setAppointmentYearFilter] = useState<'all' | string>('all');
   const [approvalStatusFilter, setApprovalStatusFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
   const [approvalTypeFilter, setApprovalTypeFilter] = useState<'all' | ApprovalHistory['requestType']>('all');
-  const [approvalSort, setApprovalSort] = useState<'newest' | 'oldest'>('newest');
+  const [approvalMonthFilter, setApprovalMonthFilter] = useState<'all' | string>('all');
+  const [approvalYearFilter, setApprovalYearFilter] = useState<'all' | string>('all');
 
   const parseErrorMessage = (data: any, fallback: string) =>
     data?.message || data?.error || fallback;
@@ -112,30 +128,49 @@ export default function AdminDoctorProfile() {
 
   const appointmentCount = appointments.length;
   const approvalCount = approvals.length;
+  const appointmentMonthOptions = useMemo(() => {
+    const uniqueMonths = Array.from(new Set(appointments.map((item) => getMonthKey(item.date)).filter(Boolean)));
+    return uniqueMonths.sort((a, b) => b.localeCompare(a));
+  }, [appointments]);
+  const appointmentYearOptions = useMemo(() => {
+    const uniqueYears = Array.from(new Set(appointments.map((item) => getYearKey(item.date)).filter(Boolean)));
+    return uniqueYears.sort((a, b) => b.localeCompare(a));
+  }, [appointments]);
+  const approvalMonthOptions = useMemo(() => {
+    const uniqueMonths = Array.from(new Set(approvals.map((item) => getMonthKey(item.createdAt)).filter(Boolean)));
+    return uniqueMonths.sort((a, b) => b.localeCompare(a));
+  }, [approvals]);
+  const approvalYearOptions = useMemo(() => {
+    const uniqueYears = Array.from(new Set(approvals.map((item) => getYearKey(item.createdAt)).filter(Boolean)));
+    return uniqueYears.sort((a, b) => b.localeCompare(a));
+  }, [approvals]);
 
   const filteredAppointments = useMemo(() => {
     const rows = sortedAppointments.filter(
       (item) => appointmentStatusFilter === 'all' || item.status === appointmentStatusFilter
-    );
+    ).filter((item) => appointmentMonthFilter === 'all' || getMonthKey(item.date) === appointmentMonthFilter)
+     .filter((item) => appointmentYearFilter === 'all' || getYearKey(item.date) === appointmentYearFilter);
 
     return [...rows].sort((a, b) => {
       const aTime = new Date(`${a.date || ''} ${a.time || ''}`).getTime();
       const bTime = new Date(`${b.date || ''} ${b.time || ''}`).getTime();
-      return appointmentSort === 'newest' ? bTime - aTime : aTime - bTime;
+      return bTime - aTime;
     });
-  }, [sortedAppointments, appointmentStatusFilter, appointmentSort]);
+  }, [sortedAppointments, appointmentMonthFilter, appointmentStatusFilter, appointmentYearFilter]);
 
   const filteredApprovals = useMemo(() => {
     const rows = approvals
       .filter((item) => approvalStatusFilter === 'all' || item.status === approvalStatusFilter)
-      .filter((item) => approvalTypeFilter === 'all' || item.requestType === approvalTypeFilter);
+      .filter((item) => approvalTypeFilter === 'all' || item.requestType === approvalTypeFilter)
+      .filter((item) => approvalMonthFilter === 'all' || getMonthKey(item.createdAt) === approvalMonthFilter)
+      .filter((item) => approvalYearFilter === 'all' || getYearKey(item.createdAt) === approvalYearFilter);
 
     return [...rows].sort((a, b) => {
       const aTime = new Date(a.createdAt || 0).getTime();
       const bTime = new Date(b.createdAt || 0).getTime();
-      return approvalSort === 'newest' ? bTime - aTime : aTime - bTime;
+      return bTime - aTime;
     });
-  }, [approvals, approvalStatusFilter, approvalTypeFilter, approvalSort]);
+  }, [approvals, approvalMonthFilter, approvalStatusFilter, approvalTypeFilter, approvalYearFilter]);
 
   useEffect(() => {
     if (!doctorId) return;
@@ -339,17 +374,42 @@ export default function AdminDoctorProfile() {
                     </Select>
 
                     <Select
-                      value={appointmentSort}
-                      onValueChange={(value) => setAppointmentSort(value as typeof appointmentSort)}
+                      value={appointmentMonthFilter}
+                      onValueChange={(value) => setAppointmentMonthFilter(value)}
                     >
-                      <SelectTrigger className="w-full rounded-xl sm:w-40">
-                        <SelectValue placeholder="Sort" />
+                      <SelectTrigger className="w-full rounded-xl sm:w-44">
+                        <SelectValue placeholder="Month" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="newest">Newest first</SelectItem>
-                        <SelectItem value="oldest">Oldest first</SelectItem>
+                        <SelectItem value="all">All months</SelectItem>
+                        {appointmentMonthOptions.map((month) => (
+                          <SelectItem key={month} value={month}>
+                            {new Date(`${month}-01T00:00:00`).toLocaleDateString('en-US', {
+                              month: 'long',
+                              year: 'numeric',
+                            })}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
+
+                    <Select
+                      value={appointmentYearFilter}
+                      onValueChange={(value) => setAppointmentYearFilter(value)}
+                    >
+                      <SelectTrigger className="w-full rounded-xl sm:w-36">
+                        <SelectValue placeholder="Year" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All years</SelectItem>
+                        {appointmentYearOptions.map((year) => (
+                          <SelectItem key={year} value={year}>
+                            {year}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+
                   </div>
                 ) : (
                   <div className="flex flex-col gap-3 sm:flex-row">
@@ -385,17 +445,42 @@ export default function AdminDoctorProfile() {
                     </Select>
 
                     <Select
-                      value={approvalSort}
-                      onValueChange={(value) => setApprovalSort(value as typeof approvalSort)}
+                      value={approvalMonthFilter}
+                      onValueChange={(value) => setApprovalMonthFilter(value)}
                     >
-                      <SelectTrigger className="w-full rounded-xl sm:w-40">
-                        <SelectValue placeholder="Sort" />
+                      <SelectTrigger className="w-full rounded-xl sm:w-44">
+                        <SelectValue placeholder="Month" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="newest">Newest first</SelectItem>
-                        <SelectItem value="oldest">Oldest first</SelectItem>
+                        <SelectItem value="all">All months</SelectItem>
+                        {approvalMonthOptions.map((month) => (
+                          <SelectItem key={month} value={month}>
+                            {new Date(`${month}-01T00:00:00`).toLocaleDateString('en-US', {
+                              month: 'long',
+                              year: 'numeric',
+                            })}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
+
+                    <Select
+                      value={approvalYearFilter}
+                      onValueChange={(value) => setApprovalYearFilter(value)}
+                    >
+                      <SelectTrigger className="w-full rounded-xl sm:w-36">
+                        <SelectValue placeholder="Year" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All years</SelectItem>
+                        {approvalYearOptions.map((year) => (
+                          <SelectItem key={year} value={year}>
+                            {year}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+
                   </div>
                 )}
               </div>

@@ -166,9 +166,13 @@ export default function AdminDoctorDetail() {
             </Button>
           </div>
 
-          <Button variant="ghost" className="w-fit gap-2" onClick={() => navigate('/admin/dashboard')}>
+          <Button
+            variant="ghost"
+            className="w-fit gap-2"
+            onClick={() => navigate(`/admin/doctors/${doctorId}`)}
+          >
             <ArrowLeft className="h-4 w-4" />
-            Back to Admin Dashboard
+            Back to Doctor Profile
           </Button>
         </div>
 
