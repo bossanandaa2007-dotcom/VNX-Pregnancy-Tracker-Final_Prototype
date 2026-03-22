@@ -1,14 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
-  LayoutDashboard,
-  BarChart3,
-  MessageCircle,
-  CalendarDays,
   User,
-  Users,
-  Library,
-  BookOpen,
   LogOut,
   Heart,
 } from 'lucide-react';
@@ -18,24 +11,7 @@ import { Button } from '@/components/ui/button';
 import { fetchUnreadCount } from '@/lib/doctorChat';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { API_BASE } from '@/config/api';
-
-interface NavItem {
-  icon: React.ElementType;
-  label: string;
-  path: string;
-  badgeType?: 'chat' | 'appointments';
-}
-
-const navItems: NavItem[] = [
-  { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard' },
-  { icon: Users, label: 'Patient Management', path: '/patients' },
-  { icon: BarChart3, label: 'Analytics', path: '/doctor/analytics' },
-  { icon: MessageCircle, label: 'Chat', path: '/doctor/chat', badgeType: 'chat' },
-  { icon: CalendarDays, label: 'Appointments', path: '/doctor/appointments', badgeType: 'appointments' },
-  { icon: BookOpen, label: 'Guide', path: '/guide' },
-  { icon: Library, label: 'Library', path: '/library' },
-  { icon: User, label: 'Profile', path: '/doctor/profile' },
-];
+import { doctorNavItems } from '@/components/layout/doctor/doctorNavConfig';
 
 type AppointmentApiShape = {
   status?: string;
@@ -174,7 +150,7 @@ export function DoctorSidebar() {
         </div>
 
         <nav className="flex-1 space-y-1 overflow-y-auto p-4">
-          {navItems.map((item) => {
+          {doctorNavItems.map((item) => {
             const isActive = location.pathname.startsWith(item.path);
             const Icon = item.icon;
 

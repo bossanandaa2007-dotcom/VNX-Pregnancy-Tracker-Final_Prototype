@@ -939,13 +939,15 @@ export default function Analytics() {
           </Button>
         )}
 
-        <div className="space-y-1">
-          <h1 className="text-2xl font-bold">Health Analytics</h1>
-          <p className="text-muted-foreground">
-            {isReadOnlyPatientView
-              ? 'Read-only view of patient health metrics'
-              : 'Track your pregnancy health journey'}
-          </p>
+        <div className="overflow-hidden rounded-2xl border bg-gradient-to-br from-primary/10 via-background to-accent/40">
+          <div className="p-5 sm:p-6">
+            <h1 className="text-2xl font-bold text-foreground">Health Analytics</h1>
+            <p className="text-muted-foreground">
+              {isReadOnlyPatientView
+                ? 'Read-only view of patient health metrics'
+                : 'Track your pregnancy health journey'}
+            </p>
+          </div>
         </div>
 
         <div className="flex gap-3 rounded-xl border border-info/20 bg-info/10 p-4">

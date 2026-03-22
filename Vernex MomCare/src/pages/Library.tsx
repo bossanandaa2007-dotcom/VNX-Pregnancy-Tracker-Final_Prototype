@@ -1,204 +1,233 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
-import { mockArticles } from '@/data/mockData';
+import { useAuth } from '@/contexts/AuthContext';
+import { useToast } from '@/hooks/use-toast';
+import { libraryApi } from '@/lib/libraryApi';
+import { LibraryShell } from '@/components/library/LibraryShell';
+import { MediaSection } from '@/components/library/MediaSection';
+import { DiaryMediaSection } from '@/components/library/DiaryMediaSection';
+import { FitnessSection } from '@/components/library/FitnessSection';
+import { MusicSection } from '@/components/library/MusicSection';
+import { MediaUploadDialog } from '@/components/library/MediaUploadDialog';
+import { MediaViewerDialog } from '@/components/library/MediaViewerDialog';
+import { AdminPatientPicker } from '@/components/library/AdminPatientPicker';
 import { Card, CardContent } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import { Search, Clock, BookOpen, ArrowRight, Baby, Heart, Apple, Dumbbell, Stethoscope, Book, Music, Bell } from 'lucide-react';
-import { Article } from '@/types';
-
-const categoryIcons: Record<string, React.ElementType> = {
-  'Pregnancy Stages': Baby,
-  'Diet & Nutrition': Apple,
-  'Symptoms & Relief': Heart,
-  'Fitness': Dumbbell,
-  'Birth Preparation': Stethoscope,
-  'Medical Care': Book,
-  'Music & Relaxation': Music,
-  'Official Updates': Bell,
-};
+import type {
+  LibraryFitnessItem,
+  LibraryItem,
+  LibraryMusicItem,
+  LibraryPatientOption,
+} from '@/types/library';
+import { getItemSearchText } from '@/components/library/libraryDisplay';
 
 export default function Library() {
+  const { user } = useAuth();
+  const { toast } = useToast();
+  const [selectedPatient, setSelectedPatient] = useState<LibraryPatientOption | null>(null);
+  const [memories, setMemories] = useState<LibraryItem[]>([]);
+  const [diaryMedia, setDiaryMedia] = useState<LibraryItem[]>([]);
+  const [fitness, setFitness] = useState<LibraryFitnessItem[]>([]);
+  const [music, setMusic] = useState<LibraryMusicItem[]>([]);
+  const [selectedItem, setSelectedItem] = useState<LibraryItem | null>(null);
+  const [memoriesDialogOpen, setMemoriesDialogOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState<string>('Official Updates');
-  const [selectedArticle, setSelectedArticle] = useState<Article | null>(null);
+  const [activeModule, setActiveModule] = useState<'memories' | 'diary' | 'fitness' | 'music'>(
+    user?.role === 'doctor' ? 'fitness' : 'memories'
+  );
 
-  const categories = [...new Set(mockArticles.map((a) => a.category))].sort((a, b) => {
-    if (a === 'Official Updates') return -1;
-    if (b === 'Official Updates') return 1;
-    return a.localeCompare(b);
-  });
+  const effectivePatientId = user?.role === 'admin' ? selectedPatient?._id || '' : user?.id || '';
+  const canManageMedia = user?.role === 'doctor';
+  const isDoctor = user?.role === 'doctor';
+  const isPatient = user?.role === 'patient';
 
-  const filteredArticles = mockArticles.filter((article) => {
-    const matchesSearch =
-      article.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      article.summary.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesCategory = article.category === selectedCategory;
-    return matchesSearch && matchesCategory;
-  });
+  const title =
+    user?.role === 'admin'
+      ? selectedPatient
+        ? `${selectedPatient.name}'s Library`
+        : 'Patient Library'
+      : 'My Secure Library';
+
+  const subtitle =
+    user?.role === 'admin'
+      ? selectedPatient
+        ? 'Review memories, diary media, pregnancy-safe fitness videos, and soothing music in one secure place.'
+        : 'Select a patient to open their secure library.'
+      : isDoctor
+      ? 'A clean dashboard for pregnancy-safe fitness videos and soothing music.'
+      : 'A clean dashboard for memories, diary media, pregnancy-safe fitness videos, and soothing music.';
+
+  useEffect(() => {
+    setActiveModule(user?.role === 'doctor' ? 'fitness' : 'memories');
+  }, [user?.role]);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadLibrary = async () => {
+      if (!effectivePatientId) {
+        if (active) {
+          setMemories([]);
+          setDiaryMedia([]);
+          setFitness([]);
+          setMusic([]);
+        }
+        return;
+      }
+
+      setLoading(true);
+      try {
+        const [memoryItems, diaryItems, fitnessItems, musicItems] = await Promise.all([
+          isPatient ? libraryApi.getPatientMemories(effectivePatientId) : Promise.resolve([]),
+          isPatient ? libraryApi.getPatientDiaryMedia(effectivePatientId) : Promise.resolve([]),
+          isPatient ? libraryApi.getPatientFitness(effectivePatientId) : libraryApi.getFitness(),
+          isPatient ? libraryApi.getPatientMusic(effectivePatientId) : libraryApi.getMusic(),
+        ]);
+
+        if (!active) return;
+        setMemories(memoryItems);
+        setDiaryMedia(diaryItems);
+        setFitness(fitnessItems);
+        setMusic(musicItems);
+      } catch (error) {
+        if (!active) return;
+        toast({
+          title: 'Library unavailable',
+          description: error instanceof Error ? error.message : 'Unable to load library sections',
+          variant: 'destructive',
+        });
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+
+    void loadLibrary();
+
+    return () => {
+      active = false;
+    };
+  }, [effectivePatientId, isPatient, toast]);
+
+  const normalizedQuery = searchQuery.trim().toLowerCase();
+  const filteredMemories = useMemo(
+    () =>
+      normalizedQuery
+        ? memories.filter((item) => getItemSearchText(item).includes(normalizedQuery))
+        : memories,
+    [memories, normalizedQuery]
+  );
+  const filteredDiaryMedia = useMemo(
+    () =>
+      normalizedQuery
+        ? diaryMedia.filter((item) => getItemSearchText(item).includes(normalizedQuery))
+        : diaryMedia,
+    [diaryMedia, normalizedQuery]
+  );
+
+  const handleUploadedMemory = (item: LibraryItem) => {
+    setMemories((prev) => [item, ...prev]);
+    toast({
+      title: 'Memory added',
+      description: 'The media item is now stored in the secure Library.',
+    });
+  };
 
   return (
     <DashboardLayout>
-      <div className="space-y-6">
-        {/* Header */}
-        <div className="overflow-hidden rounded-2xl border bg-gradient-to-br from-primary/10 via-background to-accent/40">
-          <div className="p-5 sm:p-6">
-            <h1 className="text-2xl font-bold text-foreground">Educational Library</h1>
-            <p className="text-muted-foreground">
-              Curated pregnancy resources and reading materials
-            </p>
-          </div>
-        </div>
+      <LibraryShell
+        title={title}
+        subtitle={subtitle}
+        role={isDoctor ? 'doctor' : 'patient'}
+        activeModule={activeModule}
+        onModuleChange={setActiveModule}
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+      >
+        {user?.role === 'admin' ? (
+          <AdminPatientPicker
+            selectedPatientId={selectedPatient?._id || ''}
+            onSelectPatient={(patient) => setSelectedPatient(patient)}
+          />
+        ) : null}
 
-        {/* Search & Filters */}
-        <div className="flex flex-col gap-4 sm:flex-row">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Search articles..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-9 rounded-xl"
-            />
-          </div>
-        </div>
-
-        {/* Category Pills */}
-        <div className="flex flex-wrap gap-2">
-          {categories.map((category) => (
-            <Button
-              key={category}
-              variant={selectedCategory === category ? 'default' : 'outline'}
-              size="sm"
-              className="rounded-full"
-              onClick={() => setSelectedCategory(category)}
-            >
-              {category}
-            </Button>
-          ))}
-        </div>
-
-        {/* Articles Grid */}
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {filteredArticles.map((article, index) => {
-            const Icon = categoryIcons[article.category] || BookOpen;
-            const isVideo = article.content === 'youtube';
-            const isAudio = article.content === 'spotify';
-            const mediaLabel = isVideo ? 'Video' : isAudio ? 'Audio' : 'Theory';
-            const actionLabel = article.externalLink
-              ? isVideo
-                ? 'Watch'
-                : isAudio
-                ? 'Listen'
-                : 'Open'
-              : 'Read more';
-
-            return (
-              <Card
-                key={article.id}
-                className="group cursor-pointer hover:shadow-lg transition-all duration-300 animate-fade-in overflow-hidden"
-                style={{ animationDelay: `${index * 50}ms` }}
-                onClick={() => {
-  if (article.externalLink) {
-    window.open(article.externalLink, '_blank');
-  } else {
-    setSelectedArticle(article);
-  }
-}}
-
-              >
-                {/* Colored Header */}
-                <div className="h-32 bg-gradient-to-br from-primary/20 via-primary/10 to-accent/20 flex items-center justify-center">
-                  <Icon className="h-12 w-12 text-primary/50 group-hover:scale-110 transition-transform" />
-                </div>
-
-                <CardContent className="p-5">
-                  <Badge variant="secondary" className="mb-2 text-xs">
-                    {article.category}
-                  </Badge>
-                  <Badge variant="outline" className="mb-2 ml-2 text-xs">
-                    {mediaLabel}
-                  </Badge>
-                  <h3 className="font-semibold text-foreground mb-2 line-clamp-2 group-hover:text-primary transition-colors">
-                    {article.title}
-                  </h3>
-                  <p className="text-sm text-muted-foreground line-clamp-2 mb-3">
-                    {article.summary}
-                  </p>
-                  <div className="flex items-center justify-between">
-                    <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                      <Clock className="h-3 w-3" />
-                      {article.readTime > 0 ? `${article.readTime} min read` : 'Listen'}
-
-                    </span>
-                    <span className="text-xs font-medium text-primary flex items-center gap-1 group-hover:gap-2 transition-all">
-                      {actionLabel}
-                      <ArrowRight className="h-3 w-3" />
-                    </span>
-
-                  </div>
-                </CardContent>
-              </Card>
-            );
-          })}
-        </div>
-
-        {filteredArticles.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-12">
-            <BookOpen className="h-12 w-12 text-muted-foreground/30 mb-4" />
-            <p className="text-muted-foreground">No articles found matching your search.</p>
-          </div>
-        )}
-
-        {/* Article Detail Dialog */}
-        {selectedArticle && (
-          <Dialog open={!!selectedArticle} onOpenChange={() => setSelectedArticle(null)}>
-            <DialogContent className="sm:max-w-2xl max-h-[80vh] overflow-y-auto">
-              <DialogHeader>
-                <Badge variant="secondary" className="w-fit mb-2">
-                  {selectedArticle.category}
-                </Badge>
-                <DialogTitle className="text-xl">{selectedArticle.title}</DialogTitle>
-                <div className="flex items-center gap-2 text-sm text-muted-foreground mt-2">
-                  <Clock className="h-4 w-4" />
-                  {selectedArticle.readTime} min read
-                </div>
-              </DialogHeader>
-
-              <div className="mt-4 space-y-4">
-                <div className="h-48 rounded-xl bg-gradient-to-br from-primary/20 via-primary/10 to-accent/20 flex items-center justify-center">
-                  <BookOpen className="h-16 w-16 text-primary/40" />
-                </div>
-
-                <p className="text-muted-foreground leading-relaxed">
-                  {selectedArticle.summary}
-                </p>
-
-                <div className="prose prose-sm max-w-none">
-                  <p>{selectedArticle.content}</p>
-                  {selectedArticle.summary && (
-                    <p>{selectedArticle.summary}</p>
-                  )}
-                </div>
-
-                <div className="rounded-xl bg-accent/30 p-4">
-                  <p className="text-sm font-medium mb-1">Key Takeaway</p>
-                  <p className="text-sm text-muted-foreground">
-                    Always consult with your healthcare provider for personalized advice regarding your pregnancy journey.
-                  </p>
-                </div>
+        {!effectivePatientId ? (
+          <Card className="border-0 bg-white/80 shadow-sm">
+            <CardContent className="p-8 text-center text-sm text-slate-500">
+              Select a patient to view secure Library content.
+            </CardContent>
+          </Card>
+        ) : (
+          <>
+            {activeModule === 'fitness' ? (
+              <FitnessSection
+                items={fitness}
+                loading={loading}
+                canManage={canManageMedia}
+                onCreated={(item) => setFitness((prev) => [item, ...prev])}
+                onUpdated={(item) =>
+                  setFitness((prev) => prev.map((row) => (row.id === item.id ? item : row)))
+                }
+                onDeleted={(itemId) =>
+                  setFitness((prev) => prev.filter((item) => item.id !== itemId))
+                }
+              />
+            ) : null}
+            {isPatient && activeModule === 'memories' ? (
+              <div className="space-y-4">
+                <MediaSection
+                  title="Memories"
+                  description="Camera photos, camera videos, uploaded photos, and uploaded videos grouped cleanly by source and date."
+                  items={filteredMemories}
+                  loading={loading}
+                  onOpenItem={setSelectedItem}
+                  onUploadClick={() => setMemoriesDialogOpen(true)}
+                />
               </div>
-            </DialogContent>
-          </Dialog>
+            ) : null}
+            {isPatient && activeModule === 'diary' ? (
+              <DiaryMediaSection
+                items={filteredDiaryMedia}
+                loading={loading}
+                onOpenItem={setSelectedItem}
+              />
+            ) : null}
+            {activeModule === 'music' ? (
+              <MusicSection
+                items={music}
+                loading={loading}
+                canManage={canManageMedia}
+                onCreated={(item) => setMusic((prev) => [item, ...prev])}
+                onUpdated={(item) =>
+                  setMusic((prev) => prev.map((row) => (row.id === item.id ? item : row)))
+                }
+                onDeleted={(itemId) =>
+                  setMusic((prev) => prev.filter((item) => item.id !== itemId))
+                }
+              />
+            ) : null}
+          </>
         )}
-      </div>
+      </LibraryShell>
+
+      {isPatient ? (
+        <>
+          <MediaUploadDialog
+            patientId={effectivePatientId}
+            section="memories"
+            open={memoriesDialogOpen}
+            onOpenChange={setMemoriesDialogOpen}
+            onUploaded={handleUploadedMemory}
+          />
+
+          <MediaViewerDialog
+            item={selectedItem}
+            open={!!selectedItem}
+            onOpenChange={(open) => {
+              if (!open) setSelectedItem(null);
+            }}
+          />
+        </>
+      ) : null}
     </DashboardLayout>
   );
 }

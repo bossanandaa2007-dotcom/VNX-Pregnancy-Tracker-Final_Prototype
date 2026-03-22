@@ -562,13 +562,15 @@ export default function Chat() {
   return (
     <DashboardLayout>
       <div className="h-[calc(100vh-8rem)] flex flex-col">
-        <div className="mb-4">
-          <h1 className="text-2xl font-bold text-foreground">Chat</h1>
-          <p className="text-muted-foreground">
-            {isDoctor
-              ? 'Communicate with your patients'
-              : 'Get support from AI or your doctor'}
-          </p>
+        <div className="mb-4 overflow-hidden rounded-2xl border bg-gradient-to-br from-primary/10 via-background to-accent/40">
+          <div className="p-5 sm:p-6">
+            <h1 className="text-2xl font-bold text-foreground">Chat</h1>
+            <p className="text-muted-foreground">
+              {isDoctor
+                ? 'Communicate with your patients'
+                : 'Get support from AI or your doctor'}
+            </p>
+          </div>
         </div>
 
         <Card className="flex-1 flex flex-col overflow-hidden">

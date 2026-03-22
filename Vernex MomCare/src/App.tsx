@@ -35,6 +35,12 @@ import AdminDoctorProfile from "./pages/AdminDoctorProfile";
 
 const queryClient = new QueryClient();
 
+function getHomeRouteForRole(role?: string | null) {
+  if (role === "admin") return "/admin/dashboard";
+  if (role === "doctor") return "/doctor/dashboard";
+  return "/dashboard";
+}
+
 /* ---------------- PROTECTED ROUTE ---------------- */
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuth();
@@ -48,14 +54,15 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
 /* ---------------- ROUTES ---------------- */
 function AppRoutes() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
+  const homeRoute = getHomeRouteForRole(user?.role);
 
   return (
     <Routes>
       {/* Auth */}
       <Route
         path="/login"
-        element={isAuthenticated ? <Navigate to="/dashboard" /> : <Login />}
+        element={isAuthenticated ? <Navigate to={homeRoute} replace /> : <Login />}
       />
 
       {/* ================= PATIENT ================= */}
@@ -181,7 +188,7 @@ function AppRoutes() {
         path="/doctor/dashboard"
         element={
           <ProtectedRoute>
-            <DoctorAppointments />
+            <Dashboard />
           </ProtectedRoute>
         }
       />
@@ -279,7 +286,10 @@ function AppRoutes() {
 
 
       {/* Default */}
-      <Route path="/" element={<Navigate to="/login" replace />} />
+      <Route
+        path="/"
+        element={<Navigate to={isAuthenticated ? homeRoute : "/login"} replace />}
+      />
       <Route path="*" element={<NotFound />} />
     </Routes>
   );
@@ -292,7 +302,7 @@ const App = () => (
       <AuthProvider>
         <Toaster />
         <Sonner />
-        <BrowserRouter>
+        <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
           <ScrollToTop />
           <AppRoutes />
         </BrowserRouter>

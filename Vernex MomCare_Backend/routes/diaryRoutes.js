@@ -1,5 +1,11 @@
 const express = require("express");
 const DiaryEntry = require("../models/DiaryEntry");
+const {
+  attachDiaryMedia,
+  migrateLegacyDiaryImages,
+  resolveDiaryMediaRefs,
+  toLibraryResponse,
+} = require("../services/libraryMediaService");
 
 const router = express.Router();
 
@@ -33,6 +39,30 @@ const normalizeImages = (rawImages, legacyImage) => {
   }
 
   return [];
+};
+
+const buildDiaryEntryResponse = async (req, entry) => {
+  const fallbackImages = normalizeImages(entry.images, entry.imageData);
+  let diaryMedia = await resolveDiaryMediaRefs({
+    entryId: entry._id,
+    mediaRefs: entry.mediaRefs,
+    patientId: entry.userId || entry.patientId,
+  });
+
+  if (diaryMedia.length === 0 && fallbackImages.length > 0) {
+    diaryMedia = await migrateLegacyDiaryImages(req, entry);
+  }
+
+  return {
+    ...entry.toObject(),
+    images: fallbackImages,
+    imageData: fallbackImages[0] || "",
+    mediaRefs:
+      Array.isArray(entry.mediaRefs) && entry.mediaRefs.length > 0
+        ? entry.mediaRefs.map((value) => String(value?._id || value))
+        : diaryMedia.map((item) => String(item._id)),
+    mediaItems: diaryMedia.map((item) => toLibraryResponse(item, req)),
+  };
 };
 
 // Get entry dates for a month
@@ -90,19 +120,11 @@ router.get("/", async (req, res) => {
         { patientId, entryDate: normalizedDate },
         { userId: patientId, date: normalizedDate },
       ],
-    }).lean();
+    });
     if (!entry) {
       return res.json({ entry: null });
     }
-
-    const images = normalizeImages(entry.images, entry.imageData);
-    res.json({
-      entry: {
-        ...entry,
-        images,
-        imageData: images[0] || "",
-      },
-    });
+    res.json({ entry: await buildDiaryEntryResponse(req, entry) });
   } catch (err) {
     console.error("Diary fetch error:", err);
     res.status(500).json({ error: "Failed to fetch diary entry" });
@@ -113,7 +135,7 @@ router.get("/", async (req, res) => {
 router.post("/upsert", async (req, res) => {
   try {
     const patientId = req.body?.patientId || req.body?.userId;
-    const { date, text, mood, imageData, images } = req.body;
+    const { date, text, mood, imageData, images, mediaRefs } = req.body;
     if (!patientId) return res.status(400).json({ error: "Patient ID required" });
     const normalizedDate = normalizeDate(date);
     if (!normalizedDate) return res.status(400).json({ error: "Valid date required" });
@@ -125,6 +147,7 @@ router.post("/upsert", async (req, res) => {
       mood: mood || undefined,
       imageData: normalizedImages[0] || "",
       images: normalizedImages,
+      mediaRefs: Array.isArray(mediaRefs) ? mediaRefs.filter(Boolean) : [],
     };
 
     let entry = await DiaryEntry.findOne({
@@ -151,16 +174,12 @@ router.post("/upsert", async (req, res) => {
       entry.mood = update.mood;
       entry.imageData = update.imageData;
       entry.images = update.images;
+      entry.mediaRefs = update.mediaRefs;
     }
 
     await entry.save();
-    res.json({
-      entry: {
-        ...entry.toObject(),
-        images: normalizeImages(entry.images, entry.imageData),
-        imageData: entry.imageData || "",
-      },
-    });
+    await attachDiaryMedia({ entry, mediaIds: update.mediaRefs });
+    res.json({ entry: await buildDiaryEntryResponse(req, entry) });
   } catch (err) {
     console.error("Diary upsert error:", err);
     res.status(500).json({ error: "Failed to save diary entry" });

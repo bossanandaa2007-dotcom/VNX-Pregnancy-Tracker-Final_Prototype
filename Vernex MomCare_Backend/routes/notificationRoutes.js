@@ -233,7 +233,7 @@ const fetchMohfwUpdates = async () => {
     }
     return Array.from(dedup.values()).slice(0, 10);
   } catch (err) {
-    console.error("MoHFW fetch failed:", err);
+    console.warn("MoHFW updates skipped:", err?.message || String(err));
     return [];
   }
 };

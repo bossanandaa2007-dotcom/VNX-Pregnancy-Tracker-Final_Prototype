@@ -8,7 +8,6 @@ import { useAuth } from '@/contexts/AuthContext';
 import { UserRole } from '@/types';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
-import { API_BASE } from "@/config/api";
 
 export default function Login() {
   const [phase, setPhase] = useState<'intro' | 'split' | 'login'>('intro');
@@ -49,35 +48,26 @@ export default function Login() {
   setIsLoading(true);
 
   try {
-    const response = await fetch(`${API_BASE}/api/auth/login`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        email,
-        password,
-        role: selectedRole,
-      }),
-    });
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      throw new Error(data.message || 'Login failed');
-    }
-
-    // Save user in context
-    await login(email, password, data.role);
+    const user = await login(email, password, selectedRole);
 
     // ================= ADMIN =================
-    if (data.role === 'admin') {
+    if (user.role === 'admin') {
       toast({
         title: 'Welcome Admin',
         description: 'Logged in as System Administrator',
       });
 
       navigate('/admin/dashboard');
+      return;
+    }
+
+    if (user.role === 'doctor') {
+      toast({
+        title: 'Welcome Doctor',
+        description: 'Logged in successfully',
+      });
+
+      navigate('/doctor/dashboard');
       return;
     }
 

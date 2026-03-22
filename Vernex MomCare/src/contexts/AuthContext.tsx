@@ -5,7 +5,7 @@ import { API_BASE } from "@/config/api";
 interface AuthContextType {
   user: User | null;
   isAuthenticated: boolean;
-  login: (email: string, password: string, role: UserRole) => Promise<void>;
+  login: (email: string, password: string, role: UserRole) => Promise<User>;
   logout: () => void;
   updateUser: (patch: Partial<User> & Record<string, any>) => void;
 }
@@ -33,15 +33,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
 
       const data = await res.json();
-      console.log('LOGIN RESPONSE =>', data); // keep for now
-
       if (!res.ok || !data.success) {
         throw new Error(data.message || 'Login failed');
       }
 
       /* ================= ADMIN ================= */
       if (data.role === 'admin') {
-        const nextUser = {
+        const nextUser: User = {
           id: 'admin',
           name: 'Admin',
           email: email,
@@ -49,7 +47,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         };
         setUser(nextUser);
         localStorage.setItem('vnx_user', JSON.stringify(nextUser));
-        return;
+        return nextUser;
       }
 
       /* ================= DOCTOR / PATIENT ================= */
@@ -64,7 +62,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         throw new Error('User ID missing in login response');
       }
 
-      const nextUser = {
+      const nextUser: User & Record<string, any> = {
         id: realId, // works for both _id and id
         name: data.user.name,
         email: data.user.email,
@@ -87,8 +85,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       setUser(nextUser);
       localStorage.setItem('vnx_user', JSON.stringify(nextUser));
+      return nextUser;
     } catch (error: any) {
       console.error('Login error:', error);
+      if (error instanceof TypeError) {
+        throw new Error(`Cannot reach the backend server at ${API_BASE}. Make sure the backend is running and reachable from this device.`);
+      }
       throw error;
     }
   };

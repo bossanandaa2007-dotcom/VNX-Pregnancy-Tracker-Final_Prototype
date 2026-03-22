@@ -13,6 +13,7 @@ const diaryEntrySchema = new mongoose.Schema(
     mood: { type: String, enum: ["happy", "calm", "tired", "sad"], default: undefined },
     imageData: { type: String, default: "" }, // base64 data URL
     images: [{ type: String }],
+    mediaRefs: [{ type: mongoose.Schema.Types.ObjectId, ref: "LibraryItem" }],
   },
   { timestamps: true }
 );
